@@ -21,9 +21,7 @@ export function parseAIResponse(message: string): ParsedMessage {
   let options: Array<{ label: string; value: string }> = [];
   let guiEvent: GUIEvent | undefined = undefined;
 
-  // 먼저 모든 제어 태그를 제거 (스트리밍 중 불완전한 태그도 제거하기 위해)
-  // 불완전한 태그도 감지할 수 있도록 더 유연한 패턴 사용
-  
+  // 1단계: 먼저 JSON 데이터를 추출 (제거 전에 파싱)
   // [OPTIONS: ...] 패턴 찾기 및 제거 (완전한 형태와 불완전한 형태 모두 처리)
   const optionsRegex = /\[OPTIONS:\s*(\[.*?\])\]/gs;
   const optionsMatch = text.match(optionsRegex);
@@ -58,32 +56,39 @@ export function parseAIResponse(message: string): ParsedMessage {
     }
   }
   
-  // 모든 제어 태그를 완전히 제거 (완전한 형태)
+  // 2단계: 모든 제어 태그를 완전히 제거 (텍스트 정제 - 가장 먼저 실행)
+  // 완전한 형태의 태그 제거
   text = text.replace(/\[OPTIONS:\s*\[.*?\]\]/gs, '').trim();
   text = text.replace(/\[GUI_EVENT:\s*\{.*?\}\]/gs, '').trim();
-  
-  // 불완전한 태그도 제거 (스트리밍 중 부분적으로 나타나는 경우)
-  // 예: [GUI_EVENT: {"type" 또는 [GUI_EVENT: {"type": "DRAFT" 등
-  text = text.replace(/\[GUI_EVENT:[^\]]*/g, '').trim();
-  text = text.replace(/\[OPTIONS:[^\]]*/g, '').trim();
-  
-  // 추가 정리: 남아있을 수 있는 모든 제어 태그들 완전 제거
-  text = text.replace(/\[OPTIONS:.*?\]/gs, '').trim();
-  text = text.replace(/\[GUI_EVENT:.*?\]/gs, '').trim();
   text = text.replace(/\[STATUS:.*?\]/gs, '').trim();
   text = text.replace(/\[NEWS:.*?\]/gs, '').trim();
   text = text.replace(/\[STATUS\]/gs, '').trim();
   text = text.replace(/\[NEWS\]/gs, '').trim();
   
-  // 혹시 남아있을 수 있는 모든 대괄호 패턴 제거 (안전장치)
-  // 스트리밍 중 불완전한 태그도 제거
-  text = text.replace(/\[GUI_EVENT:[^\]]*/g, '').trim();
-  text = text.replace(/\[OPTIONS:[^\]]*/g, '').trim();
-  text = text.replace(/\[STATUS:[^\]]*/g, '').trim();
-  text = text.replace(/\[NEWS:[^\]]*/g, '').trim();
-  text = text.replace(/\[[A-Z_]+:[^\]]*/g, '').trim();
+  // 불완전한 태그도 제거 (스트리밍 중 부분적으로 나타나는 경우)
+  // 예: [GUI_EVENT: {"type" 또는 [GUI_EVENT: {"type": "DRAFT" 등
+  // 재귀적으로 여러 번 실행하여 모든 패턴 제거
+  let previousText = '';
+  while (text !== previousText) {
+    previousText = text;
+    text = text.replace(/\[GUI_EVENT:[^\]]*/g, '').trim();
+    text = text.replace(/\[OPTIONS:[^\]]*/g, '').trim();
+    text = text.replace(/\[STATUS:[^\]]*/g, '').trim();
+    text = text.replace(/\[NEWS:[^\]]*/g, '').trim();
+    text = text.replace(/\[[A-Z_]+:[^\]]*/g, '').trim();
+    // 대괄호로 시작해서 닫히지 않은 모든 패턴 제거
+    text = text.replace(/\[[A-Z_]+[^\]]*/g, '').trim();
+  }
   
-  // 빈 줄 정리
+  // 3단계: 남아있을 수 있는 모든 대괄호 패턴 제거 (최종 안전장치)
+  // 모든 제어 태그 패턴을 전역으로 제거
+  text = text.replace(/\[OPTIONS:.*?\]/gs, '').trim();
+  text = text.replace(/\[GUI_EVENT:.*?\]/gs, '').trim();
+  text = text.replace(/\[STATUS:.*?\]/gs, '').trim();
+  text = text.replace(/\[NEWS:.*?\]/gs, '').trim();
+  text = text.replace(/\[[A-Z_]+:.*?\]/gs, '').trim();
+  
+  // 4단계: 빈 줄 정리
   text = text.replace(/\n\s*\n\s*\n/g, '\n\n').trim();
   
   return { text, options, guiEvent };

@@ -87,9 +87,22 @@ export default function MessageBubble({
                   {children}
                 </th>
               ),
-              td: ({ children }: any) => {
+              td: ({ children, ...props }: any) => {
+                const columnIndex = props['data-column-index'] ?? -1;
+                const cellText = typeof children === 'string' ? children : String(children);
+                // 첫 번째 컬럼(구분: 1군/2군) 스타일링
+                const isDivisionColumn = columnIndex === 0 && (cellText.trim() === '1군' || cellText.trim() === '2군');
+                
                 return (
-                  <td className="border border-gray-300 px-2 py-1.5 text-xs font-mono cursor-default whitespace-nowrap">
+                  <td 
+                    className={`border border-gray-300 px-2 py-1.5 text-xs font-mono cursor-default whitespace-nowrap ${
+                      isDivisionColumn 
+                        ? cellText.trim() === '1군' 
+                          ? 'font-bold text-baseball-green bg-green-50' 
+                          : 'font-bold text-gray-600 bg-gray-50'
+                        : ''
+                    }`}
+                  >
                     {children}
                   </td>
                 );
