@@ -39,65 +39,65 @@ export default function GameHeader({
             </div>
           </div>
           
-          <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
+          <div className="flex items-center gap-1 sm:gap-2 lg:gap-4 flex-shrink-0 flex-wrap">
             {/* 아이콘 버튼들 */}
-            <div className="flex items-center gap-1 sm:gap-2 border-r border-baseball-gold/40 pr-2 sm:pr-4">
+            <div className="flex items-center gap-1 sm:gap-2 border-r border-baseball-gold/40 pr-1 sm:pr-2 lg:pr-4">
               {onNewsClick && (
                 <button
                   onClick={onNewsClick}
-                  className="p-1.5 hover:bg-white/10 rounded transition-colors"
+                  className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
                   title="뉴스"
                 >
-                  <Newspaper className="w-4 h-4 text-baseball-gold" />
+                  <Newspaper className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
                 </button>
               )}
               {onSave && (
                 <button
                   onClick={onSave}
-                  className="p-1.5 hover:bg-white/10 rounded transition-colors"
+                  className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
                   title="게임 저장"
                 >
-                  <Save className="w-4 h-4 text-baseball-gold" />
+                  <Save className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
                 </button>
               )}
               {onLoad && (
                 <button
                   onClick={onLoad}
-                  className="p-1.5 hover:bg-white/10 rounded transition-colors"
+                  className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
                   title="게임 불러오기"
                 >
-                  <Download className="w-4 h-4 text-baseball-gold" />
+                  <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
                 </button>
               )}
               {onApiKeyClick && (
                 <button
                   onClick={onApiKeyClick}
-                  className="p-1.5 hover:bg-white/10 rounded transition-colors"
+                  className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
                   title="API 키 설정"
                 >
-                  <KeyRound className="w-4 h-4 text-baseball-gold" />
+                  <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
                 </button>
               )}
             </div>
 
-            <span className="text-baseball-gold/60">|</span>
+            <span className="hidden sm:inline text-baseball-gold/60">|</span>
             
-            <div className="flex items-center gap-1.5 whitespace-nowrap">
-              <DollarSign className="w-4 h-4 text-[#C5A059] flex-shrink-0" />
-              <span className="text-xs text-gray-300 font-sans">보유 자금</span>
-              <span className="text-baseball-gold/60">|</span>
-              <span className="font-mono font-bold text-[#C5A059] text-sm">
+            <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
+              <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#C5A059] flex-shrink-0" />
+              <span className="hidden sm:inline text-xs text-gray-300 font-sans">보유 자금</span>
+              <span className="hidden sm:inline text-baseball-gold/60">|</span>
+              <span className="font-mono font-bold text-[#C5A059] text-xs sm:text-sm truncate">
                 {displayBudget}
               </span>
             </div>
             
-            <span className="text-baseball-gold/60">|</span>
+            <span className="hidden sm:inline text-baseball-gold/60">|</span>
             
-            <div className="flex items-center gap-1.5 whitespace-nowrap">
-              <Calendar className="w-4 h-4 text-baseball-gold flex-shrink-0" />
-              <span className="text-xs text-gray-300 font-sans">날짜</span>
-              <span className="text-baseball-gold/60">|</span>
-              <span className="font-mono font-semibold text-sm">{displayDate}</span>
+            <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
+              <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold flex-shrink-0" />
+              <span className="hidden sm:inline text-xs text-gray-300 font-sans">날짜</span>
+              <span className="hidden sm:inline text-baseball-gold/60">|</span>
+              <span className="font-mono font-semibold text-xs sm:text-sm truncate">{displayDate}</span>
             </div>
           </div>
         </div>
