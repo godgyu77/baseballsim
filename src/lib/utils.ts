@@ -12,25 +12,174 @@ export interface GUIEvent {
 export type GamePhase = 'TEAM_SELECTION' | 'MAIN_GAME' | 'EVENT_MODAL' | 'NEGOTIATION';
 
 /**
+ * 시스템 태그를 완전히 제거하는 전용 함수
+ * 멀티라인 JSON과 중첩 구조를 모두 처리합니다.
+ */
+function removeSystemTags(text: string): string {
+  let cleaned = text;
+  
+  // 중첩된 JSON 구조를 포함한 완전한 매칭을 위한 헬퍼 함수
+  const findMatchingBracket = (str: string, startIndex: number, openChar: string, closeChar: string): number => {
+    let depth = 0;
+    let inString = false;
+    let escapeNext = false;
+    
+    for (let i = startIndex; i < str.length; i++) {
+      const char = str[i];
+      
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+      
+      if (char === '\\') {
+        escapeNext = true;
+        continue;
+      }
+      
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      
+      if (inString) continue;
+      
+      if (char === openChar) depth++;
+      if (char === closeChar) {
+        depth--;
+        if (depth === 0) return i;
+      }
+    }
+    return -1;
+  };
+  
+  // 반복적으로 모든 시스템 태그를 제거 (무한 루프 방지)
+  let previousText = '';
+  let iterations = 0;
+  const maxIterations = 20;
+  
+  while (cleaned !== previousText && iterations < maxIterations) {
+    previousText = cleaned;
+    iterations++;
+    
+    // [GUI_EVENT: ...] 패턴 제거 (멀티라인, 중첩 JSON 모두 처리)
+    const guiEventPattern = /\[GUI_EVENT:\s*\{/gs;
+    let match;
+    while ((match = guiEventPattern.exec(cleaned)) !== null) {
+      const startIndex = match.index;
+      const jsonStart = match.index + match[0].length - 1; // '{' 위치
+      const jsonEnd = findMatchingBracket(cleaned, jsonStart, '{', '}');
+      
+      if (jsonEnd !== -1) {
+        // ']'까지 찾기
+        const tagEnd = cleaned.indexOf(']', jsonEnd);
+        if (tagEnd !== -1) {
+          cleaned = cleaned.substring(0, startIndex) + cleaned.substring(tagEnd + 1);
+          guiEventPattern.lastIndex = 0; // 리셋
+        }
+      }
+    }
+    
+    // [OPTIONS: ...] 패턴 제거 (멀티라인, 중첩 배열 모두 처리)
+    const optionsPattern = /\[OPTIONS:\s*\[/gs;
+    while ((match = optionsPattern.exec(cleaned)) !== null) {
+      const startIndex = match.index;
+      const arrayStart = match.index + match[0].length - 1; // '[' 위치
+      const arrayEnd = findMatchingBracket(cleaned, arrayStart, '[', ']');
+      
+      if (arrayEnd !== -1) {
+        // ']'까지 찾기
+        const tagEnd = cleaned.indexOf(']', arrayEnd);
+        if (tagEnd !== -1) {
+          cleaned = cleaned.substring(0, startIndex) + cleaned.substring(tagEnd + 1);
+          optionsPattern.lastIndex = 0; // 리셋
+        }
+      }
+    }
+    
+    // [STATUS: ...] 패턴 제거 (멀티라인 지원)
+    cleaned = cleaned.replace(/\[STATUS:[\s\S]*?\]/gs, '');
+    
+    // [NEWS: ...] 패턴 제거 (멀티라인 지원)
+    cleaned = cleaned.replace(/\[NEWS:[\s\S]*?\]/gs, '');
+    
+    // 불완전한 태그도 제거 (스트리밍 중 부분적으로 나타나는 경우)
+    cleaned = cleaned.replace(/\[GUI_EVENT:[\s\S]*$/gs, '');
+    cleaned = cleaned.replace(/\[OPTIONS:[\s\S]*$/gs, '');
+    cleaned = cleaned.replace(/\[STATUS:[\s\S]*$/gs, '');
+    cleaned = cleaned.replace(/\[NEWS:[\s\S]*$/gs, '');
+    
+    // 일반적인 시스템 태그 패턴 제거
+    cleaned = cleaned.replace(/\[[A-Z_]+:[\s\S]*?\]/gs, '');
+  }
+  
+  // JSON처럼 보이는 텍스트 블록 제거 (찌꺼기 제거)
+  // 중첩된 JSON 객체를 재귀적으로 찾아서 제거
+  const removeJsonObjects = (str: string): string => {
+    let result = str;
+    let changed = true;
+    let iterations = 0;
+    const maxIterations = 10;
+    
+    while (changed && iterations < maxIterations) {
+      changed = false;
+      iterations++;
+      const before = result;
+      
+      // 중괄호로 시작하는 JSON 객체 패턴 찾기
+      const jsonPattern = /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/gs;
+      result = result.replace(jsonPattern, (match) => {
+        // 시스템 관련 키워드나 JSON 키가 포함된 경우 제거
+        if (/prev_league|cost|GUI_EVENT|OPTIONS|STATUS|NEWS|"id"|"name"|"label"|"value"|"type"|"data"/i.test(match)) {
+          changed = true;
+          return '';
+        }
+        return match;
+      });
+      
+      // }, { "label": ... 같은 패턴 제거
+      result = result.replace(/,\s*\{\s*"label"/gs, '');
+      result = result.replace(/\}\s*,\s*\{/gs, '');
+      
+      // 혼자 떨어진 JSON 키-값 쌍 제거
+      result = result.replace(/,\s*"prev_league"\s*:\s*"[^"]*"/gs, '');
+      result = result.replace(/,\s*"cost"\s*:\s*[^,\}]+/gs, '');
+      result = result.replace(/"prev_league"\s*:\s*"[^"]*"\s*,?/gs, '');
+      result = result.replace(/"cost"\s*:\s*[^,\}]+/gs, '');
+    }
+    
+    return result;
+  };
+  
+  cleaned = removeJsonObjects(cleaned);
+  
+  // 빈 줄 정리
+  cleaned = cleaned.replace(/\n\s*\n\s*\n+/g, '\n\n');
+  cleaned = cleaned.trim();
+  
+  return cleaned;
+}
+
+/**
  * AI 응답에서 OPTIONS JSON을 파싱하여 텍스트와 선택지를 분리합니다.
  * @param message AI가 보낸 원본 메시지
  * @returns 파싱된 텍스트와 옵션 배열
  */
 export function parseAIResponse(message: string): ParsedMessage {
-  let text = message;
+  const originalText = message;
   let options: Array<{ label: string; value: string }> = [];
   let guiEvent: GUIEvent | undefined = undefined;
 
-  // 1단계: 먼저 JSON 데이터를 추출 (제거 전에 파싱)
-  // [OPTIONS: ...] 패턴 찾기 및 제거 (완전한 형태와 불완전한 형태 모두 처리)
-  const optionsRegex = /\[OPTIONS:\s*(\[.*?\])\]/gs;
-  const optionsMatch = text.match(optionsRegex);
+  // 1단계: 원본 텍스트에서 데이터 추출 (제거 전에 파싱)
+  
+  // [OPTIONS: ...] 패턴 찾기 및 파싱
+  const optionsRegex = /\[OPTIONS:\s*(\[[\s\S]*?\])\]/gs;
+  const optionsMatch = originalText.match(optionsRegex);
   
   if (optionsMatch) {
     try {
-      // 첫 번째 매치만 파싱 (일반적으로 하나만 있음)
       const firstMatch = optionsMatch[0];
-      const jsonMatch = firstMatch.match(/\[OPTIONS:\s*(\[.*?\])\]/s);
+      const jsonMatch = firstMatch.match(/\[OPTIONS:\s*(\[[\s\S]*?\])\]/s);
       if (jsonMatch && jsonMatch[1]) {
         options = JSON.parse(jsonMatch[1]);
       }
@@ -39,8 +188,7 @@ export function parseAIResponse(message: string): ParsedMessage {
     }
   }
 
-  // [GUI_EVENT: ...] 패턴 찾기 및 제거 (중첩된 JSON 구조 처리)
-  // 중첩된 중괄호를 고려하여 매칭
+  // [GUI_EVENT: ...] 패턴 찾기 및 파싱 (중첩된 JSON 구조 처리)
   const findNestedJson = (str: string, startIndex: number): number => {
     let depth = 0;
     let inString = false;
@@ -76,71 +224,27 @@ export function parseAIResponse(message: string): ParsedMessage {
   };
   
   // GUI_EVENT 태그 찾기 및 파싱
-  const guiEventStartRegex = /\[GUI_EVENT:\s*\{/g;
+  const guiEventStartRegex = /\[GUI_EVENT:\s*\{/gs;
   let guiEventMatch;
-  while ((guiEventMatch = guiEventStartRegex.exec(text)) !== null) {
+  while ((guiEventMatch = guiEventStartRegex.exec(originalText)) !== null) {
     const startIndex = guiEventMatch.index + guiEventMatch[0].length - 1; // '{' 위치
-    const endIndex = findNestedJson(text, startIndex);
+    const endIndex = findNestedJson(originalText, startIndex);
     
     if (endIndex !== -1) {
       try {
-        const jsonStr = text.substring(startIndex, endIndex + 1);
+        const jsonStr = originalText.substring(startIndex, endIndex + 1);
         guiEvent = JSON.parse(jsonStr);
+        break; // 첫 번째 유효한 이벤트만 파싱
       } catch (e) {
         console.error('GUI 이벤트 파싱 오류:', e);
       }
     }
   }
   
-  // 2단계: 모든 제어 태그를 완전히 제거 (텍스트 정제 - 가장 먼저 실행)
-  // 중첩된 JSON 구조를 포함한 완전한 태그 제거
-  // [GUI_EVENT: { ... }] 패턴 제거 (중괄호 매칭)
-  let previousText = '';
-  let iterations = 0;
-  const maxIterations = 10; // 무한 루프 방지
+  // 2단계: 화면 표시용 텍스트 생성 (모든 시스템 태그 제거)
+  const cleanText = removeSystemTags(originalText);
   
-  while (text !== previousText && iterations < maxIterations) {
-    previousText = text;
-    iterations++;
-    
-    // 완전한 형태의 태그 제거 (중첩 구조 고려)
-    text = text.replace(/\[OPTIONS:\s*\[[\s\S]*?\]\]/gs, '').trim();
-    
-    // GUI_EVENT: 중괄호 매칭으로 제거
-    const guiEventPattern = /\[GUI_EVENT:\s*\{[\s\S]*?\}\]/gs;
-    text = text.replace(guiEventPattern, '').trim();
-    
-    // 단순 태그들 제거
-    text = text.replace(/\[STATUS:.*?\]/gs, '').trim();
-    text = text.replace(/\[NEWS:.*?\]/gs, '').trim();
-    text = text.replace(/\[STATUS\]/gs, '').trim();
-    text = text.replace(/\[NEWS\]/gs, '').trim();
-    
-    // 불완전한 태그도 제거 (스트리밍 중 부분적으로 나타나는 경우)
-    text = text.replace(/\[GUI_EVENT:[^\]]*/g, '').trim();
-    text = text.replace(/\[OPTIONS:[^\]]*/g, '').trim();
-    text = text.replace(/\[STATUS:[^\]]*/g, '').trim();
-    text = text.replace(/\[NEWS:[^\]]*/g, '').trim();
-    text = text.replace(/\[[A-Z_]+:[^\]]*/g, '').trim();
-  }
-  
-  // 3단계: 남아있을 수 있는 모든 대괄호 패턴 제거 (최종 안전장치)
-  // 모든 제어 태그 패턴을 전역으로 제거 (더 공격적으로)
-  text = text.replace(/\[OPTIONS:[\s\S]*?\]/gs, '').trim();
-  text = text.replace(/\[GUI_EVENT:[\s\S]*?\]/gs, '').trim();
-  text = text.replace(/\[STATUS:[\s\S]*?\]/gs, '').trim();
-  text = text.replace(/\[NEWS:[\s\S]*?\]/gs, '').trim();
-  text = text.replace(/\[[A-Z_]+:[\s\S]*?\]/gs, '').trim();
-  
-  // 4단계: 혹시 남아있을 수 있는 JSON 객체 패턴 제거 (추가 안전장치)
-  // {"id": ...} 같은 패턴이 혼자 남아있는 경우 제거
-  text = text.replace(/\{"id":\s*\d+[^}]*\}/g, '').trim();
-  text = text.replace(/\{"name":\s*"[^"]*"[^}]*\}/g, '').trim();
-  
-  // 4단계: 빈 줄 정리
-  text = text.replace(/\n\s*\n\s*\n/g, '\n\n').trim();
-  
-  return { text, options, guiEvent };
+  return { text: cleanText, options, guiEvent };
 }
 
 /**
