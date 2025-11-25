@@ -154,14 +154,32 @@ function removeSystemTags(text: string): string {
   cleaned = removeJsonObjects(cleaned);
   
   // 혼자 떨어진 대괄호 제거 (시스템 태그 제거 후 남은 찌꺼기)
-  cleaned = cleaned.replace(/^\s*\]\s*/gm, ''); // 줄 시작의 ]
-  cleaned = cleaned.replace(/\s*\]\s*$/gm, ''); // 줄 끝의 ]
-  cleaned = cleaned.replace(/\s+\]\s+/g, ' '); // 중간의 혼자 있는 ]
-  cleaned = cleaned.replace(/\]\s*\]/g, ''); // 연속된 ]
-  cleaned = cleaned.replace(/\[\s*\]/g, ''); // 빈 대괄호 []
+  // 여러 번 반복하여 확실히 제거
+  let previousCleaned = '';
+  let bracketIterations = 0;
+  while (cleaned !== previousCleaned && bracketIterations < 10) {
+    previousCleaned = cleaned;
+    bracketIterations++;
+    
+    cleaned = cleaned.replace(/^\s*\]\s*/gm, ''); // 줄 시작의 ]
+    cleaned = cleaned.replace(/\s*\]\s*$/gm, ''); // 줄 끝의 ]
+    cleaned = cleaned.replace(/\s+\]\s+/g, ' '); // 중간의 혼자 있는 ]
+    cleaned = cleaned.replace(/\]\s*\]/g, ''); // 연속된 ]
+    cleaned = cleaned.replace(/\[\s*\]/g, ''); // 빈 대괄호 []
+    cleaned = cleaned.replace(/\s*\]\s*$/g, ''); // 전체 텍스트 끝의 ]
+    cleaned = cleaned.replace(/\]\s*$/g, ''); // 공백 없이 끝에 있는 ]
+  }
+  
+  // 최종적으로 텍스트 끝의 ] 제거 (여러 번 반복)
+  cleaned = cleaned.replace(/\]+$/g, ''); // 끝에 있는 모든 ]
+  cleaned = cleaned.replace(/\s+\]+$/g, ''); // 끝에 있는 공백과 ]
   
   // 빈 줄 정리
   cleaned = cleaned.replace(/\n\s*\n\s*\n+/g, '\n\n');
+  cleaned = cleaned.trim();
+  
+  // 마지막 한 번 더 확인하여 끝의 ] 제거
+  cleaned = cleaned.replace(/\]+$/g, '');
   cleaned = cleaned.trim();
   
   return cleaned;
