@@ -74,8 +74,21 @@ export default function EventModal({
 
               {/* Content */}
               <div className="flex-1 overflow-y-auto p-6 bg-gradient-to-b from-gray-50 to-white">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {players.map((player) => {
+                {players.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                    <div className="text-4xl mb-4">📋</div>
+                    <p className="text-lg font-semibold mb-2">데이터가 없습니다</p>
+                    <p className="text-sm text-gray-400">트레이드 가능한 선수가 없습니다.</p>
+                    <button
+                      onClick={onClose}
+                      className="mt-6 px-6 py-2 bg-baseball-green hover:bg-baseball-green-dark text-white rounded-lg transition-colors"
+                    >
+                      닫기
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {players.map((player) => {
                     // 투수 포지션 판단 (키워드 확장: 좌투, 우투 추가)
                     const pitcherKeywords = ['투수', '선발', '불펜', '마무리', '좌투', '우투', 'P', 'SP', 'RP', 'CP'];
                     const isPitcher = pitcherKeywords.some(keyword => 
@@ -159,7 +172,8 @@ export default function EventModal({
                       />
                     );
                   })}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>

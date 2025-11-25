@@ -21,7 +21,10 @@ export function parseAIResponse(message: string): ParsedMessage {
   let options: Array<{ label: string; value: string }> = [];
   let guiEvent: GUIEvent | undefined = undefined;
 
-  // [OPTIONS: ...] 패턴 찾기 (글로벌 플래그로 모든 인스턴스 제거)
+  // 먼저 모든 제어 태그를 제거 (스트리밍 중 불완전한 태그도 제거하기 위해)
+  // 불완전한 태그도 감지할 수 있도록 더 유연한 패턴 사용
+  
+  // [OPTIONS: ...] 패턴 찾기 및 제거 (완전한 형태와 불완전한 형태 모두 처리)
   const optionsRegex = /\[OPTIONS:\s*(\[.*?\])\]/gs;
   const optionsMatch = text.match(optionsRegex);
   
@@ -36,11 +39,9 @@ export function parseAIResponse(message: string): ParsedMessage {
     } catch (e) {
       console.error('옵션 파싱 오류:', e);
     }
-    // 모든 OPTIONS 태그 제거
-    text = text.replace(/\[OPTIONS:\s*\[.*?\]\]/gs, '').trim();
   }
 
-  // [GUI_EVENT: ...] 패턴 찾기 (글로벌 플래그로 모든 인스턴스 제거)
+  // [GUI_EVENT: ...] 패턴 찾기 및 제거 (완전한 형태와 불완전한 형태 모두 처리)
   const guiEventRegex = /\[GUI_EVENT:\s*(\{.*?\})\]/gs;
   const guiMatch = text.match(guiEventRegex);
   
@@ -55,9 +56,16 @@ export function parseAIResponse(message: string): ParsedMessage {
     } catch (e) {
       console.error('GUI 이벤트 파싱 오류:', e);
     }
-    // 모든 GUI_EVENT 태그 제거
-    text = text.replace(/\[GUI_EVENT:\s*\{.*?\}\]/gs, '').trim();
   }
+  
+  // 모든 제어 태그를 완전히 제거 (완전한 형태)
+  text = text.replace(/\[OPTIONS:\s*\[.*?\]\]/gs, '').trim();
+  text = text.replace(/\[GUI_EVENT:\s*\{.*?\}\]/gs, '').trim();
+  
+  // 불완전한 태그도 제거 (스트리밍 중 부분적으로 나타나는 경우)
+  // 예: [GUI_EVENT: {"type" 또는 [GUI_EVENT: {"type": "DRAFT" 등
+  text = text.replace(/\[GUI_EVENT:[^\]]*/g, '').trim();
+  text = text.replace(/\[OPTIONS:[^\]]*/g, '').trim();
   
   // 추가 정리: 남아있을 수 있는 모든 제어 태그들 완전 제거
   text = text.replace(/\[OPTIONS:.*?\]/gs, '').trim();
@@ -68,7 +76,15 @@ export function parseAIResponse(message: string): ParsedMessage {
   text = text.replace(/\[NEWS\]/gs, '').trim();
   
   // 혹시 남아있을 수 있는 모든 대괄호 패턴 제거 (안전장치)
-  text = text.replace(/\[[A-Z_]+:.*?\]/gs, '').trim();
+  // 스트리밍 중 불완전한 태그도 제거
+  text = text.replace(/\[GUI_EVENT:[^\]]*/g, '').trim();
+  text = text.replace(/\[OPTIONS:[^\]]*/g, '').trim();
+  text = text.replace(/\[STATUS:[^\]]*/g, '').trim();
+  text = text.replace(/\[NEWS:[^\]]*/g, '').trim();
+  text = text.replace(/\[[A-Z_]+:[^\]]*/g, '').trim();
+  
+  // 빈 줄 정리
+  text = text.replace(/\n\s*\n\s*\n/g, '\n\n').trim();
   
   return { text, options, guiEvent };
 }

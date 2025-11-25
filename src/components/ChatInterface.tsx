@@ -191,9 +191,18 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
           
           // GUI 이벤트 처리
           if (parsed.guiEvent) {
-            setGuiEvent(parsed.guiEvent);
-            setGamePhase('EVENT_MODAL');
-            playSound('swoosh');
+            console.log('[GUI_EVENT] 수신:', parsed.guiEvent);
+            // players 데이터가 있는지 확인
+            const hasPlayers = parsed.guiEvent.data?.players && Array.isArray(parsed.guiEvent.data.players) && parsed.guiEvent.data.players.length > 0;
+            if (hasPlayers) {
+              setGuiEvent(parsed.guiEvent);
+              setGamePhase('EVENT_MODAL');
+              playSound('swoosh');
+            } else {
+              console.warn('[GUI_EVENT] players 데이터가 없거나 비어있음:', parsed.guiEvent);
+              // 데이터가 없으면 모달을 열지 않고 채팅으로만 표시
+              playSound('success');
+            }
           } else {
             playSound('success');
           }
@@ -212,8 +221,16 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
             
             // GUI 이벤트 처리
             if (parsed.guiEvent) {
-              setGuiEvent(parsed.guiEvent);
-              setGamePhase('EVENT_MODAL');
+              console.log('[GUI_EVENT] 수신:', parsed.guiEvent);
+              // players 데이터가 있는지 확인
+              const hasPlayers = parsed.guiEvent.data?.players && Array.isArray(parsed.guiEvent.data.players) && parsed.guiEvent.data.players.length > 0;
+              if (hasPlayers) {
+                setGuiEvent(parsed.guiEvent);
+                setGamePhase('EVENT_MODAL');
+              } else {
+                console.warn('[GUI_EVENT] players 데이터가 없거나 비어있음:', parsed.guiEvent);
+                // 데이터가 없으면 모달을 열지 않고 채팅으로만 표시
+              }
             }
           } else {
             throw streamError;
