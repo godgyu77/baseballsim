@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { getGeminiModel } from '../lib/gemini';
@@ -99,13 +99,23 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
   }, [messages]);
 
 
-  const handleSend = async (messageText: string) => {
-    if (!messageText.trim() || isLoading) return;
+  const isLoadingRef = useRef(false);
+  
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
+
+  const handleSend = useCallback(async (messageText: string) => {
+    if (!messageText.trim() || isLoadingRef.current) return;
 
     playSound('click');
     const userMessage = messageText.trim();
     setInput('');
+    
+    // 사용자 메시지를 먼저 추가
     setMessages((prev) => [...prev, { text: userMessage, isUser: true }]);
+    
+    // 로딩 시작 (임시 말풍선은 추가하지 않음)
     setIsLoading(true);
     setCurrentOptions([]);
 
@@ -116,135 +126,95 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
 
       // 채팅 인스턴스가 없으면 새로 생성
       if (!chatInstanceRef.current) {
-        const history = messages.length > 1 
-          ? messages.slice(1, -1).map(msg => ({
-              role: msg.isUser ? 'user' : 'model',
-              parts: [{ text: msg.text }],
-            }))
-          : [];
+        setMessages((currentMessages) => {
+          // 사용자 메시지와 AI 응답을 제외한 히스토리 생성
+          const history = currentMessages.length > 1 
+            ? currentMessages.slice(0, -1).map(msg => ({
+                role: msg.isUser ? 'user' : 'model',
+                parts: [{ text: msg.text }],
+              }))
+            : [];
 
-        chatInstanceRef.current = modelRef.current.startChat({
-          history: history,
+          chatInstanceRef.current = modelRef.current.startChat({
+            history: history,
+          });
+          return currentMessages;
         });
       }
 
-      // 스트리밍으로 응답 받기 (버퍼에 모으기만 함)
-      const result = await chatInstanceRef.current.sendMessageStream(userMessage);
-      let fullText = '';
+      // 채팅 인스턴스가 여전히 없으면 다시 생성
+      if (!chatInstanceRef.current) {
+        setMessages((currentMessages) => {
+          const history = currentMessages.length > 1 
+            ? currentMessages.slice(0, -1).map(msg => ({
+                role: msg.isUser ? 'user' : 'model',
+                parts: [{ text: msg.text }],
+              }))
+            : [];
 
-      try {
-        // 모든 스트리밍 데이터를 버퍼에 모음 (화면에는 표시하지 않음)
-        for await (const chunk of result.stream) {
-          try {
-            const chunkText = chunk.text();
-            if (chunkText) {
-              fullText += chunkText;
-              // 스트리밍 중에는 화면 업데이트하지 않음
-            }
-          } catch (chunkError) {
-            console.warn('Chunk 처리 오류:', chunkError);
-          }
-        }
-
-        // 스트리밍 완료 후 최종 응답 확인
-        const response = await result.response;
-        const finalText = response.text();
-        
-        if (finalText && finalText !== fullText) {
-          fullText = finalText;
-        }
-
-        if (fullText) {
-          // 1단계: parseAIResponse로 태그 제거 및 옵션/GUI 이벤트 추출
-          const parsed = parseAIResponse(fullText);
-          
-          // 2단계: 헤더 정보 업데이트 (날짜/자금)
-          const extractedDate = extractDate(parsed.text);
-          if (extractedDate) {
-            setGameState(prev => ({ ...prev, date: extractedDate }));
-          }
-          
-          const extractedBudget = extractBudget(parsed.text);
-          console.log('[자금 파싱] 원본 텍스트:', fullText.substring(0, 200));
-          console.log('[자금 파싱] 파싱된 텍스트:', parsed.text.substring(0, 200));
-          console.log('[자금 파싱] 추출된 자금:', extractedBudget);
-          if (extractedBudget !== null && extractedBudget > 0) {
-            console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget.toLocaleString('ko-KR') + '원');
-            setGameState(prev => ({ ...prev, budget: extractedBudget }));
-          } else {
-            console.log('[자금 파싱] ❌ 자금 추출 실패 또는 0원');
-          }
-          
-          // 3단계: 클린 텍스트를 메시지에 추가 (한 번에)
-          setMessages((prev) => [...prev, { text: fullText, isUser: false }]);
-          
-          // 4단계: 옵션 버튼 설정
-          setCurrentOptions(parsed.options);
-          
-          // 5단계: GUI 이벤트 처리 (모달 데이터 확인)
-          if (parsed.guiEvent) {
-            console.log('[GUI_EVENT] 수신:', parsed.guiEvent);
-            // players 데이터가 있는지 확인
-            const hasPlayers = parsed.guiEvent.data?.players && Array.isArray(parsed.guiEvent.data.players) && parsed.guiEvent.data.players.length > 0;
-            if (hasPlayers) {
-              setGuiEvent(parsed.guiEvent);
-              setGamePhase('EVENT_MODAL');
-              playSound('swoosh');
-            } else {
-              console.warn('[GUI_EVENT] players 데이터가 없거나 비어있음:', parsed.guiEvent);
-              // 데이터가 없으면 모달을 열지 않고 채팅으로만 표시
-              playSound('success');
-            }
-          } else {
-            playSound('success');
-          }
-        } else {
-          throw new Error('응답을 받을 수 없었습니다.');
-        }
-      } catch (streamError) {
-        console.error('스트리밍 오류:', streamError);
-        try {
-          // 스트리밍 실패 시 최종 응답으로 재시도
-          const response = await result.response;
-          const text = response.text();
-          if (text) {
-            const parsed = parseAIResponse(text);
-            
-            // 헤더 정보 업데이트
-            const extractedDate = extractDate(parsed.text);
-            if (extractedDate) {
-              setGameState(prev => ({ ...prev, date: extractedDate }));
-            }
-            
-            const extractedBudget = extractBudget(parsed.text);
-            if (extractedBudget !== null && extractedBudget > 0) {
-              setGameState(prev => ({ ...prev, budget: extractedBudget }));
-            }
-            
-            setMessages((prev) => [...prev, { text, isUser: false }]);
-            setCurrentOptions(parsed.options);
-            
-            // GUI 이벤트 처리
-            if (parsed.guiEvent) {
-              console.log('[GUI_EVENT] 수신:', parsed.guiEvent);
-              const hasPlayers = parsed.guiEvent.data?.players && Array.isArray(parsed.guiEvent.data.players) && parsed.guiEvent.data.players.length > 0;
-              if (hasPlayers) {
-                setGuiEvent(parsed.guiEvent);
-                setGamePhase('EVENT_MODAL');
-                playSound('swoosh');
-              } else {
-                playSound('success');
-              }
-            } else {
-              playSound('success');
-            }
-          } else {
-            throw streamError;
-          }
-        } catch {
-          throw streamError;
-        }
+          chatInstanceRef.current = modelRef.current.startChat({
+            history: history,
+          });
+          return currentMessages;
+        });
       }
+
+      // 스트리밍 없이 완전한 응답을 기다림
+      const result = await chatInstanceRef.current.sendMessage(userMessage);
+      
+      // 전체 응답 텍스트 가져오기
+      const fullText = result.response.text();
+      
+      if (!fullText) {
+        throw new Error('응답을 받을 수 없었습니다.');
+      }
+
+      // 일괄 처리: 모든 파싱과 업데이트를 먼저 수행
+      
+      // 1단계: parseAIResponse로 태그 제거 및 옵션/GUI 이벤트 추출
+      const parsed = parseAIResponse(fullText);
+      
+      // 2단계: 헤더 정보 업데이트 (날짜/자금)
+      const extractedDate = extractDate(parsed.text);
+      if (extractedDate) {
+        setGameState(prev => ({ ...prev, date: extractedDate }));
+      }
+      
+      const extractedBudget = extractBudget(parsed.text);
+      console.log('[자금 파싱] 원본 텍스트:', fullText.substring(0, 200));
+      console.log('[자금 파싱] 파싱된 텍스트:', parsed.text.substring(0, 200));
+      console.log('[자금 파싱] 추출된 자금:', extractedBudget);
+      if (extractedBudget !== null && extractedBudget > 0) {
+        console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget.toLocaleString('ko-KR') + '원');
+        setGameState(prev => ({ ...prev, budget: extractedBudget }));
+      } else {
+        console.log('[자금 파싱] ❌ 자금 추출 실패 또는 0원');
+      }
+      
+      // 3단계: 옵션 버튼 설정
+      setCurrentOptions(parsed.options);
+      
+      // 4단계: GUI 이벤트 처리 (모달 데이터 확인)
+      if (parsed.guiEvent) {
+        console.log('[GUI_EVENT] 수신:', parsed.guiEvent);
+        // players 데이터가 있는지 확인
+        const hasPlayers = parsed.guiEvent.data?.players && Array.isArray(parsed.guiEvent.data.players) && parsed.guiEvent.data.players.length > 0;
+        if (hasPlayers) {
+          setGuiEvent(parsed.guiEvent);
+          setGamePhase('EVENT_MODAL');
+          playSound('swoosh');
+        } else {
+          console.warn('[GUI_EVENT] players 데이터가 없거나 비어있음:', parsed.guiEvent);
+          // 데이터가 없으면 모달을 열지 않고 채팅으로만 표시
+          playSound('success');
+        }
+      } else {
+        playSound('success');
+      }
+      
+      // 5단계: 모든 처리가 끝난 후 메시지 추가 (딱 한 번만 호출)
+      setMessages((prev) => [...prev, { text: fullText, isUser: false }]);
+      
     } catch (error: any) {
       console.error('Error:', error);
       const errorMessage = error?.message || error?.toString() || '알 수 없는 오류';
@@ -257,19 +227,20 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
       ]);
       setCurrentOptions([]);
     } finally {
+      // 로딩 종료
       setIsLoading(false);
     }
-  };
+  }, [playSound]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     handleSend(input);
-  };
+  }, [handleSend, input]);
 
-  const handleOptionClick = (value: string) => {
+  const handleOptionClick = useCallback((value: string) => {
     playSound('click');
     handleSend(value);
-  };
+  }, [handleSend, playSound]);
 
   // 세이브 기능
   const handleSave = () => {
@@ -315,25 +286,29 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
   };
 
   // GUI 이벤트 핸들러
-  const handlePlayerSelect = (player: Player) => {
+  const handlePlayerSelect = useCallback((player: Player) => {
     playSound('coin');
     const message = `${player.name} 선수 선택`;
     setGamePhase('NEGOTIATION');
     setNegotiationPlayer(player.name);
     handleSend(message);
-  };
+  }, [handleSend, playSound]);
 
-  const handleNegotiationSubmit = (amount: number) => {
-    const message = `${negotiationPlayer} 선수에게 ${amount.toLocaleString()}원 제시`;
+  const handleNegotiationSubmit = useCallback((amount: number) => {
+    setNegotiationPlayer((prevPlayer) => {
+      if (prevPlayer) {
+        const message = `${prevPlayer} 선수에게 ${amount.toLocaleString()}원 제시`;
+        handleSend(message);
+      }
+      return null;
+    });
     setGamePhase('MAIN_GAME');
-    setNegotiationPlayer(null);
-    handleSend(message);
-  };
+  }, [handleSend]);
 
-  const handleEventModalClose = () => {
+  const handleEventModalClose = useCallback(() => {
     setGamePhase('MAIN_GAME');
     setGuiEvent(null);
-  };
+  }, []);
 
   // 마지막 AI 메시지에서 옵션 추출 (표시용)
   const lastAIMessage = messages.filter(m => !m.isUser).slice(-1)[0];
