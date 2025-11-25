@@ -42,6 +42,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInstanceRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
+  const messagesRef = useRef<Message[]>([]);
   const { playSound } = useSound();
 
   useEffect(() => {
@@ -67,6 +68,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
   }, [selectedTeam, isModelReady, messages.length]);
 
   useEffect(() => {
+    messagesRef.current = messages;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
@@ -125,38 +127,25 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
       }
 
       // 채팅 인스턴스가 없으면 새로 생성
+      // messagesRef를 사용하여 최신 메시지 목록 참조 (방금 추가한 사용자 메시지 포함)
       if (!chatInstanceRef.current) {
-        setMessages((currentMessages) => {
-          // 사용자 메시지와 AI 응답을 제외한 히스토리 생성
-          const history = currentMessages.length > 1 
-            ? currentMessages.slice(0, -1).map(msg => ({
-                role: msg.isUser ? 'user' : 'model',
-                parts: [{ text: msg.text }],
-              }))
-            : [];
+        // 사용자 메시지를 제외한 히스토리 생성 (방금 추가한 메시지 제외)
+        const currentMessages = [...messagesRef.current, { text: userMessage, isUser: true }];
+        const history = currentMessages.length > 1 
+          ? currentMessages.slice(0, -1).map(msg => ({
+              role: msg.isUser ? 'user' : 'model',
+              parts: [{ text: msg.text }],
+            }))
+          : [];
 
-          chatInstanceRef.current = modelRef.current.startChat({
-            history: history,
-          });
-          return currentMessages;
+        chatInstanceRef.current = modelRef.current.startChat({
+          history: history,
         });
       }
 
-      // 채팅 인스턴스가 여전히 없으면 다시 생성
+      // 채팅 인스턴스가 여전히 없으면 에러
       if (!chatInstanceRef.current) {
-        setMessages((currentMessages) => {
-          const history = currentMessages.length > 1 
-            ? currentMessages.slice(0, -1).map(msg => ({
-                role: msg.isUser ? 'user' : 'model',
-                parts: [{ text: msg.text }],
-              }))
-            : [];
-
-          chatInstanceRef.current = modelRef.current.startChat({
-            history: history,
-          });
-          return currentMessages;
-        });
+        throw new Error('채팅 인스턴스를 생성할 수 없습니다.');
       }
 
       // 스트리밍 없이 완전한 응답을 기다림
