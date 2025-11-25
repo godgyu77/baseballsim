@@ -39,54 +39,103 @@ export function parseAIResponse(message: string): ParsedMessage {
     }
   }
 
-  // [GUI_EVENT: ...] 패턴 찾기 및 제거 (완전한 형태와 불완전한 형태 모두 처리)
-  const guiEventRegex = /\[GUI_EVENT:\s*(\{.*?\})\]/gs;
-  const guiMatch = text.match(guiEventRegex);
-  
-  if (guiMatch) {
-    try {
-      // 첫 번째 매치만 파싱
-      const firstMatch = guiMatch[0];
-      const jsonMatch = firstMatch.match(/\[GUI_EVENT:\s*(\{.*?\})\]/s);
-      if (jsonMatch && jsonMatch[1]) {
-        guiEvent = JSON.parse(jsonMatch[1]);
+  // [GUI_EVENT: ...] 패턴 찾기 및 제거 (중첩된 JSON 구조 처리)
+  // 중첩된 중괄호를 고려하여 매칭
+  const findNestedJson = (str: string, startIndex: number): number => {
+    let depth = 0;
+    let inString = false;
+    let escapeNext = false;
+    
+    for (let i = startIndex; i < str.length; i++) {
+      const char = str[i];
+      
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
       }
-    } catch (e) {
-      console.error('GUI 이벤트 파싱 오류:', e);
+      
+      if (char === '\\') {
+        escapeNext = true;
+        continue;
+      }
+      
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      
+      if (inString) continue;
+      
+      if (char === '{') depth++;
+      if (char === '}') {
+        depth--;
+        if (depth === 0) return i;
+      }
+    }
+    return -1;
+  };
+  
+  // GUI_EVENT 태그 찾기 및 파싱
+  const guiEventStartRegex = /\[GUI_EVENT:\s*\{/g;
+  let guiEventMatch;
+  while ((guiEventMatch = guiEventStartRegex.exec(text)) !== null) {
+    const startIndex = guiEventMatch.index + guiEventMatch[0].length - 1; // '{' 위치
+    const endIndex = findNestedJson(text, startIndex);
+    
+    if (endIndex !== -1) {
+      try {
+        const jsonStr = text.substring(startIndex, endIndex + 1);
+        guiEvent = JSON.parse(jsonStr);
+      } catch (e) {
+        console.error('GUI 이벤트 파싱 오류:', e);
+      }
     }
   }
   
   // 2단계: 모든 제어 태그를 완전히 제거 (텍스트 정제 - 가장 먼저 실행)
-  // 완전한 형태의 태그 제거
-  text = text.replace(/\[OPTIONS:\s*\[.*?\]\]/gs, '').trim();
-  text = text.replace(/\[GUI_EVENT:\s*\{.*?\}\]/gs, '').trim();
-  text = text.replace(/\[STATUS:.*?\]/gs, '').trim();
-  text = text.replace(/\[NEWS:.*?\]/gs, '').trim();
-  text = text.replace(/\[STATUS\]/gs, '').trim();
-  text = text.replace(/\[NEWS\]/gs, '').trim();
-  
-  // 불완전한 태그도 제거 (스트리밍 중 부분적으로 나타나는 경우)
-  // 예: [GUI_EVENT: {"type" 또는 [GUI_EVENT: {"type": "DRAFT" 등
-  // 재귀적으로 여러 번 실행하여 모든 패턴 제거
+  // 중첩된 JSON 구조를 포함한 완전한 태그 제거
+  // [GUI_EVENT: { ... }] 패턴 제거 (중괄호 매칭)
   let previousText = '';
-  while (text !== previousText) {
+  let iterations = 0;
+  const maxIterations = 10; // 무한 루프 방지
+  
+  while (text !== previousText && iterations < maxIterations) {
     previousText = text;
+    iterations++;
+    
+    // 완전한 형태의 태그 제거 (중첩 구조 고려)
+    text = text.replace(/\[OPTIONS:\s*\[[\s\S]*?\]\]/gs, '').trim();
+    
+    // GUI_EVENT: 중괄호 매칭으로 제거
+    const guiEventPattern = /\[GUI_EVENT:\s*\{[\s\S]*?\}\]/gs;
+    text = text.replace(guiEventPattern, '').trim();
+    
+    // 단순 태그들 제거
+    text = text.replace(/\[STATUS:.*?\]/gs, '').trim();
+    text = text.replace(/\[NEWS:.*?\]/gs, '').trim();
+    text = text.replace(/\[STATUS\]/gs, '').trim();
+    text = text.replace(/\[NEWS\]/gs, '').trim();
+    
+    // 불완전한 태그도 제거 (스트리밍 중 부분적으로 나타나는 경우)
     text = text.replace(/\[GUI_EVENT:[^\]]*/g, '').trim();
     text = text.replace(/\[OPTIONS:[^\]]*/g, '').trim();
     text = text.replace(/\[STATUS:[^\]]*/g, '').trim();
     text = text.replace(/\[NEWS:[^\]]*/g, '').trim();
     text = text.replace(/\[[A-Z_]+:[^\]]*/g, '').trim();
-    // 대괄호로 시작해서 닫히지 않은 모든 패턴 제거
-    text = text.replace(/\[[A-Z_]+[^\]]*/g, '').trim();
   }
   
   // 3단계: 남아있을 수 있는 모든 대괄호 패턴 제거 (최종 안전장치)
-  // 모든 제어 태그 패턴을 전역으로 제거
-  text = text.replace(/\[OPTIONS:.*?\]/gs, '').trim();
-  text = text.replace(/\[GUI_EVENT:.*?\]/gs, '').trim();
-  text = text.replace(/\[STATUS:.*?\]/gs, '').trim();
-  text = text.replace(/\[NEWS:.*?\]/gs, '').trim();
-  text = text.replace(/\[[A-Z_]+:.*?\]/gs, '').trim();
+  // 모든 제어 태그 패턴을 전역으로 제거 (더 공격적으로)
+  text = text.replace(/\[OPTIONS:[\s\S]*?\]/gs, '').trim();
+  text = text.replace(/\[GUI_EVENT:[\s\S]*?\]/gs, '').trim();
+  text = text.replace(/\[STATUS:[\s\S]*?\]/gs, '').trim();
+  text = text.replace(/\[NEWS:[\s\S]*?\]/gs, '').trim();
+  text = text.replace(/\[[A-Z_]+:[\s\S]*?\]/gs, '').trim();
+  
+  // 4단계: 혹시 남아있을 수 있는 JSON 객체 패턴 제거 (추가 안전장치)
+  // {"id": ...} 같은 패턴이 혼자 남아있는 경우 제거
+  text = text.replace(/\{"id":\s*\d+[^}]*\}/g, '').trim();
+  text = text.replace(/\{"name":\s*"[^"]*"[^}]*\}/g, '').trim();
   
   // 4단계: 빈 줄 정리
   text = text.replace(/\n\s*\n\s*\n/g, '\n\n').trim();
