@@ -87,7 +87,7 @@ export default function MessageBubble({
                   {children}
                 </th>
               ),
-              td: ({ children, ...props }: any) => {
+              td: ({ children }: any) => {
                 return (
                   <td className="border border-gray-300 px-2 py-1.5 text-xs font-mono cursor-default whitespace-nowrap">
                     {children}

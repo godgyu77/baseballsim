@@ -26,7 +26,7 @@ interface EventModalProps {
 
 export default function EventModal({
   isOpen,
-  type,
+  type: _type,
   title,
   players,
   onSelect,
@@ -109,9 +109,6 @@ export default function EventModal({
                       defense: generateRandomStat(60, 85),
                       speed: generateRandomStat(55, 85),
                     };
-                    
-                    // 포지션별 기본 스탯 선택
-                    const defaultStats = isPitcher ? defaultPitcherStats : defaultBatterStats;
                     
                     // 기존 스탯과 병합 (유효한 값만 사용, 0이거나 null이면 더미 데이터 사용)
                     const mergedStats = isPitcher ? {

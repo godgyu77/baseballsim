@@ -1,16 +1,10 @@
-import { useRef, useEffect, useState } from 'react';
-
-interface SoundOptions {
-  volume?: number;
-  loop?: boolean;
-}
+import { useState } from 'react';
 
 const DEFAULT_VOLUME = 0.3;
 
 export function useSound() {
   const [volume, setVolume] = useState(DEFAULT_VOLUME);
   const [isMuted, setIsMuted] = useState(false);
-  const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
 
   // 무료 효과음 URL (Zapsplat 또는 다른 무료 사운드 라이브러리)
   const soundUrls = {
@@ -40,7 +34,7 @@ export function useSound() {
     oscillator.stop(audioContext.currentTime + duration);
   };
 
-  const playSound = (soundName: keyof typeof soundUrls, options?: SoundOptions) => {
+  const playSound = (soundName: keyof typeof soundUrls) => {
     if (isMuted) return;
 
     try {

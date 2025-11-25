@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { getGeminiModel } from '../lib/gemini';
 import GameHeader from './GameHeader';
 import MessageBubble from './MessageBubble';
