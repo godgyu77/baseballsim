@@ -1,9 +1,11 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { SYSTEM_PROMPT } from '../constants/GameConstants';
 
 export const GEMINI_MODEL = 'gemini-2.5-flash';
 
-export function getGeminiModel(apiKey: string) {
+export async function getGeminiModel(apiKey: string) {
+  // SYSTEM_PROMPT를 동적으로 로드하여 초기 번들 크기 감소
+  const { SYSTEM_PROMPT } = await import('../constants/GameConstants');
+  
   const genAI = new GoogleGenerativeAI(apiKey);
   
   return genAI.getGenerativeModel({

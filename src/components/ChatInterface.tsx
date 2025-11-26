@@ -47,9 +47,11 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
 
   useEffect(() => {
     if (apiKey) {
-      modelRef.current = getGeminiModel(apiKey);
-      chatInstanceRef.current = null;
-      setIsModelReady(true);
+      (async () => {
+        modelRef.current = await getGeminiModel(apiKey);
+        chatInstanceRef.current = null;
+        setIsModelReady(true);
+      })();
     } else {
       setIsModelReady(false);
     }
