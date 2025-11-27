@@ -638,7 +638,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
       />
 
       {/* 메인 - 채팅 영역 */}
-      <div className="flex-1 overflow-y-auto px-2 sm:px-4 py-4 sm:py-6">
+      <div className="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-4 md:py-6 overscroll-contain">
         <div className="max-w-5xl mx-auto w-full">
           {messages.map((msg, idx) => (
             <MessageBubble
@@ -664,17 +664,20 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="명령을 입력하세요..."
-              className="flex-1 px-3 sm:px-4 md:px-5 py-2.5 sm:py-3 text-sm sm:text-base border-2 border-baseball-green/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green/50 focus:border-baseball-green disabled:bg-gray-100 font-sans shadow-sm focus:shadow-md transition-all touch-manipulation"
+              className="flex-1 px-3 sm:px-4 md:px-5 py-3 sm:py-3.5 text-base sm:text-base border-2 border-baseball-green/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green/50 focus:border-baseball-green disabled:bg-gray-100 font-sans shadow-sm focus:shadow-md transition-all touch-manipulation min-h-[44px]"
               disabled={isLoading}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
             />
             <motion.button
               type="submit"
               disabled={isLoading || !input.trim()}
               whileHover={{ scale: 1.05, y: -2 }}
               whileTap={{ scale: 0.95 }}
-              className="px-4 sm:px-6 md:px-7 py-2.5 sm:py-3 bg-gradient-to-r from-baseball-green to-[#0a3528] hover:from-baseball-green-dark hover:to-[#08251f] disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white font-bold rounded-lg transition-all shadow-lg hover:shadow-xl active:shadow-md border-b-2 border-baseball-green-dark/50 touch-manipulation flex-shrink-0"
+              className="px-5 sm:px-6 md:px-7 py-3 sm:py-3.5 min-w-[44px] min-h-[44px] bg-gradient-to-r from-baseball-green to-[#0a3528] hover:from-baseball-green-dark hover:to-[#08251f] disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white font-bold rounded-lg transition-all shadow-lg hover:shadow-xl active:shadow-md border-b-2 border-baseball-green-dark/50 touch-manipulation flex-shrink-0 flex items-center justify-center"
             >
-              <Send className="w-4 h-4 sm:w-5 sm:h-5" />
+              <Send className="w-5 h-5 sm:w-5 sm:h-5" />
             </motion.button>
           </div>
         </form>
@@ -715,7 +718,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
               setIsOptionsModalOpen(true);
               playSound('click');
             }}
-            className="fixed bottom-20 sm:bottom-24 right-3 sm:right-4 md:right-6 z-40 bg-gradient-to-r from-baseball-green to-[#0a3528] text-white px-3 sm:px-4 md:px-5 py-2.5 sm:py-3 md:py-4 rounded-full shadow-2xl hover:shadow-3xl transition-all border-2 border-baseball-gold/30 flex items-center justify-center gap-1.5 sm:gap-2 group cursor-pointer touch-manipulation"
+            className="fixed bottom-20 sm:bottom-24 right-3 sm:right-4 md:right-6 z-40 bg-gradient-to-r from-baseball-green to-[#0a3528] text-white px-4 sm:px-4 md:px-5 py-3 sm:py-3 md:py-4 rounded-full shadow-2xl hover:shadow-3xl transition-all border-2 border-baseball-gold/30 flex items-center justify-center gap-1.5 sm:gap-2 group cursor-pointer touch-manipulation min-w-[56px] min-h-[56px] safe-area-bottom"
             title="작전 지시 확인"
           >
             {/* 펄스 애니메이션 링 (외부 링) */}

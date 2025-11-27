@@ -11,11 +11,52 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* 모바일 터치 최적화 */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  /* 모바일 스크롤 최적화 */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
 }
 
 #root {
   width: 100%;
   min-height: 100vh;
+  /* 모바일에서 안전 영역 고려 */
+  min-height: -webkit-fill-available;
+}
+
+/* 모바일 터치 최적화 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, a {
+  touch-action: manipulation;
+  min-height: 44px; /* 최소 터치 타겟 크기 */
+  min-width: 44px;
+}
+
+/* 모바일에서 입력 필드 자동 줌 방지 */
+@media screen and (max-width: 768px) {
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  textarea,
+  select {
+    font-size: 16px !important; /* iOS 자동 줌 방지 */
+  }
+}
+
+/* 모바일 스크롤 최적화 */
+@media (max-width: 768px) {
+  html {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  body {
+    overflow-x: hidden;
+  }
 }
 
 /* Glassmorphism 효과 */

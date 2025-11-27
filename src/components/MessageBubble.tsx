@@ -67,15 +67,15 @@ function MessageBubble({
         </div>
 
         {/* 게임스러운 본문 */}
-        <div className="px-4 py-4 text-sm text-gray-800 bg-white/50">
+        <div className="px-3 sm:px-4 py-3 sm:py-4 text-xs sm:text-sm text-gray-800 bg-white/50">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
               // 표 스타일링 (컴팩트, 고정 헤더, 반응형)
               table: ({ children }: any) => (
-                <div className="w-full overflow-x-auto my-3 -mx-4 px-4">
+                <div className="w-full overflow-x-auto my-3 -mx-4 px-2 sm:px-4 touch-pan-x">
                   <div className="inline-block min-w-full align-middle">
-                    <table className="w-full border-collapse bg-white text-xs">
+                    <table className="w-full border-collapse bg-white text-[10px] sm:text-xs">
                       {children}
                     </table>
                   </div>
@@ -109,7 +109,7 @@ function MessageBubble({
                 );
               },
               th: ({ children }: any) => (
-                <th className="border border-gray-300 px-2 py-1.5 text-left font-semibold text-xs text-white bg-baseball-green whitespace-nowrap cursor-default">
+                <th className="border border-gray-300 px-1.5 sm:px-2 py-1 sm:py-1.5 text-left font-semibold text-[10px] sm:text-xs text-white bg-baseball-green whitespace-nowrap cursor-default">
                   {children}
                 </th>
               ),
@@ -121,7 +121,7 @@ function MessageBubble({
                 
                 return (
                   <td 
-                    className={`border border-gray-300 px-2 py-1.5 text-xs font-mono cursor-default whitespace-nowrap ${
+                    className={`border border-gray-300 px-1.5 sm:px-2 py-1 sm:py-1.5 text-[10px] sm:text-xs font-mono cursor-default whitespace-nowrap ${
                       isDivisionColumn 
                         ? cellText.trim() === '1군' 
                           ? 'font-bold text-baseball-green bg-green-50' 
@@ -135,13 +135,13 @@ function MessageBubble({
               },
               // 일반 텍스트 스타일
               p: ({ children }) => (
-                <p className="mb-2 last:mb-0 whitespace-pre-wrap leading-relaxed text-gray-800">
+                <p className="mb-2 last:mb-0 whitespace-pre-wrap leading-relaxed text-gray-800 break-words">
                   {children}
                 </p>
               ),
               // 코드 블록
               pre: ({ children }) => (
-                <pre className="bg-gray-50 p-2 rounded text-xs font-mono overflow-x-auto my-2 border border-gray-200">
+                <pre className="bg-gray-50 p-2 sm:p-3 rounded text-[10px] sm:text-xs font-mono overflow-x-auto my-2 border border-gray-200 touch-pan-x">
                   {children}
                 </pre>
               ),
@@ -149,7 +149,7 @@ function MessageBubble({
               code: ({ children, className }) => {
                 const isInline = !className;
                 return isInline ? (
-                  <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono text-baseball-green">
+                  <code className="bg-gray-100 px-1 py-0.5 rounded text-[10px] sm:text-xs font-mono text-baseball-green break-all">
                     {children}
                   </code>
                 ) : (

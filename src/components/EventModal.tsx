@@ -57,23 +57,23 @@ export default function EventModal({
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 safe-area-inset"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col border border-white/50">
+            <div className="bg-white/95 backdrop-blur-xl rounded-xl sm:rounded-2xl shadow-2xl max-w-6xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-hidden flex flex-col border border-white/50">
               {/* Header */}
-              <div className="bg-baseball-green text-white p-4 flex items-center justify-between">
-                <h2 className="text-2xl font-bold">{title}</h2>
+              <div className="bg-baseball-green text-white p-3 sm:p-4 flex items-center justify-between">
+                <h2 className="text-lg sm:text-xl md:text-2xl font-bold truncate pr-2">{title}</h2>
                 <button
                   onClick={onClose}
-                  className="p-1 hover:bg-white/20 rounded transition-colors"
+                  className="p-2 hover:bg-white/20 rounded transition-colors touch-manipulation min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
                 >
-                  <X className="w-6 h-6" />
+                  <X className="w-5 h-5 sm:w-6 sm:h-6" />
                 </button>
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto p-6 bg-gradient-to-b from-gray-50 to-white">
+              <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 bg-gradient-to-b from-gray-50 to-white overscroll-contain">
                 {players.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-gray-500">
                     <div className="text-4xl mb-4">📋</div>
@@ -87,7 +87,7 @@ export default function EventModal({
                     </button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
                     {players.map((player) => {
                     // 투수 포지션 판단 (키워드 확장: 좌투, 우투 추가)
                     const pitcherKeywords = ['투수', '선발', '불펜', '마무리', '좌투', '우투', 'P', 'SP', 'RP', 'CP'];
