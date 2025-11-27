@@ -19,16 +19,16 @@ export default function ApiKeyModal({ onApiKeySet }: ApiKeyModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="bg-baseball-green p-2 rounded-lg">
-            <Key className="w-6 h-6 text-white" />
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3 sm:p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4 sm:p-6">
+        <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+          <div className="bg-baseball-green p-1.5 sm:p-2 rounded-lg flex-shrink-0">
+            <Key className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
           </div>
-          <h2 className="text-xl font-bold text-gray-800">Gemini API 키 입력</h2>
+          <h2 className="text-lg sm:text-xl font-bold text-gray-800">Gemini API 키 입력</h2>
         </div>
         
-        <p className="text-gray-600 mb-4 text-sm">
+        <p className="text-gray-600 mb-3 sm:mb-4 text-xs sm:text-sm">
           게임을 시작하려면 Google Gemini API 키가 필요합니다.
         </p>
 
@@ -41,22 +41,22 @@ export default function ApiKeyModal({ onApiKeySet }: ApiKeyModalProps) {
               setError('');
             }}
             placeholder="API 키를 입력하세요"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green focus:border-transparent mb-2"
+            className="w-full px-3 sm:px-4 py-2 sm:py-2.5 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green focus:border-transparent mb-2 touch-manipulation"
           />
           
           {error && (
-            <p className="text-red-500 text-sm mb-2">{error}</p>
+            <p className="text-red-500 text-xs sm:text-sm mb-2">{error}</p>
           )}
 
           <button
             type="submit"
-            className="w-full bg-baseball-green hover:bg-baseball-green-dark text-white font-semibold py-2 px-4 rounded-lg transition-colors"
+            className="w-full bg-baseball-green hover:bg-baseball-green-dark active:bg-baseball-green-dark text-white font-semibold py-2.5 sm:py-3 px-4 rounded-lg transition-colors touch-manipulation"
           >
             시작하기
           </button>
         </form>
 
-        <p className="text-xs text-gray-500 mt-4">
+        <p className="text-[10px] sm:text-xs text-gray-500 mt-3 sm:mt-4">
           API 키는 브라우저에 저장되며, 서버로 전송되지 않습니다.
         </p>
       </div>

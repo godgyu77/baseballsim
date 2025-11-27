@@ -26,12 +26,13 @@ interface ChatInterfaceProps {
   apiKey: string;
   selectedTeam: Team;
   onResetApiKey?: () => void;
+  shouldLoadGame?: boolean;
+  onGameLoaded?: () => void;
 }
 
-// 저장/불러오기 기능 제거됨
-// const SAVE_KEY = 'baseball_game_save';
+const SAVE_KEY = 'baseball_game_save';
 
-export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: ChatInterfaceProps) {
+export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, shouldLoadGame = false, onGameLoaded }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -60,6 +61,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
   const [pendingOptions, setPendingOptions] = useState<Array<{ label: string; value: string }>>([]);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [isNewsOpen, setIsNewsOpen] = useState(false);
+  const [readNewsCount, setReadNewsCount] = useState(0); // 읽은 뉴스 개수 추적
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInstanceRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
@@ -72,15 +74,65 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
         modelRef.current = await getGeminiModel(apiKey);
         chatInstanceRef.current = null;
         setIsModelReady(true);
+        
+        // 불러오기 요청이 있으면 게임 상태 복원
+        if (shouldLoadGame) {
+          const savedData = localStorage.getItem(SAVE_KEY);
+          if (savedData) {
+            try {
+              const parsed = JSON.parse(savedData);
+              if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+                // 메시지 복원
+                setMessages(parsed.messages);
+                messagesRef.current = parsed.messages;
+                
+                // 게임 상태 복원
+                if (parsed.gameState) {
+                  setGameState(parsed.gameState);
+                }
+                if (parsed.facilities) {
+                  setFacilities(parsed.facilities);
+                }
+                if (parsed.newsItems) {
+                  setNewsItems(parsed.newsItems);
+                }
+                if (parsed.readNewsCount !== undefined) {
+                  setReadNewsCount(parsed.readNewsCount);
+                }
+                
+                // 모델에 메시지 히스토리 복원 (API 연결 유지)
+                if (modelRef.current && parsed.messages.length > 0) {
+                  const history = parsed.messages.map((msg: Message) => ({
+                    role: msg.isUser ? 'user' : 'model',
+                    parts: [{ text: msg.text }],
+                  }));
+                  
+                  chatInstanceRef.current = modelRef.current.startChat({
+                    history: history,
+                  });
+                }
+                
+                if (onGameLoaded) {
+                  onGameLoaded();
+                }
+              }
+            } catch (e) {
+              console.error('불러오기 오류:', e);
+            }
+          }
+        }
       })();
     } else {
       setIsModelReady(false);
     }
-  }, [apiKey]);
+  }, [apiKey, shouldLoadGame, onGameLoaded]);
 
-  // 게임 시작 시 팀 정보 전송 (모델 초기화 후)
+  // 게임 시작 시 팀 정보 전송 (모델 초기화 후, 저장된 데이터가 없을 때만)
   useEffect(() => {
-    if (selectedTeam && messages.length === 0 && isModelReady && modelRef.current) {
+    const savedData = localStorage.getItem(SAVE_KEY);
+    const hasSavedData = savedData && JSON.parse(savedData).messages?.length > 0;
+    
+    if (selectedTeam && messages.length === 0 && isModelReady && modelRef.current && !hasSavedData) {
       const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 게임을 시작해주세요.`;
       // 약간의 지연을 두어 모든 초기화가 완료되도록 함
       const timer = setTimeout(() => {
@@ -249,46 +301,11 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
           }
           
           // GUI 이벤트 처리 (RECRUIT 타입 포함)
+          // 선수 목록 모달은 표시하지 않고 채팅으로만 처리
           if (parsed.guiEvent) {
             console.log('[GUI_EVENT] 수신:', parsed.guiEvent);
-            
-            // RECRUIT 타입 처리
-            if (parsed.guiEvent.type === 'RECRUIT') {
-              // candidates를 players로 변환
-              const candidates = parsed.guiEvent.candidates || parsed.guiEvent.data?.candidates || [];
-              if (candidates.length > 0) {
-                const players = candidates.map((candidate: any, idx: number) => ({
-                  id: candidate.id || `recruit-${idx}`,
-                  name: candidate.name || candidate.이름 || '',
-                  position: candidate.position || candidate.포지션 || '',
-                  stats: {
-                    age: candidate.age || candidate.나이,
-                    salary: candidate.cost || candidate.희망연봉 || candidate.연봉,
-                    ...candidate
-                  },
-                  ...candidate
-                }));
-                setGuiEvent({
-                  ...parsed.guiEvent,
-                  type: 'RECRUIT',
-                  data: { players }
-                });
-                setGamePhase('EVENT_MODAL');
-                playSound('swoosh');
-              }
-            } else {
-              // 기존 타입 처리 (DRAFT, FA, TRADE, NEGOTIATION)
-              const hasPlayers = parsed.guiEvent.data?.players && Array.isArray(parsed.guiEvent.data.players) && parsed.guiEvent.data.players.length > 0;
-              if (hasPlayers) {
-                setGuiEvent(parsed.guiEvent);
-                setGamePhase('EVENT_MODAL');
-                playSound('swoosh');
-              } else {
-                console.warn('[GUI_EVENT] players 데이터가 없거나 비어있음:', parsed.guiEvent);
-                // 데이터가 없으면 모달을 열지 않고 채팅으로만 표시
-                playSound('success');
-              }
-            }
+            // 모달을 표시하지 않고 채팅으로만 표시
+            playSound('success');
           } else {
             playSound('success');
           }
@@ -316,17 +333,10 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
             }
             
             // GUI 이벤트 처리
+            // 선수 목록 모달은 표시하지 않고 채팅으로만 처리
             if (parsed.guiEvent) {
               console.log('[GUI_EVENT] 수신:', parsed.guiEvent);
-              // players 데이터가 있는지 확인
-              const hasPlayers = parsed.guiEvent.data?.players && Array.isArray(parsed.guiEvent.data.players) && parsed.guiEvent.data.players.length > 0;
-              if (hasPlayers) {
-                setGuiEvent(parsed.guiEvent);
-                setGamePhase('EVENT_MODAL');
-              } else {
-                console.warn('[GUI_EVENT] players 데이터가 없거나 비어있음:', parsed.guiEvent);
-                // 데이터가 없으면 모달을 열지 않고 채팅으로만 표시
-              }
+              // 모달을 표시하지 않고 채팅으로만 표시
             }
           } else {
             throw streamError;
@@ -495,9 +505,86 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
     console.log(`[시설 업그레이드] ${definition.name} Lv.${facility.level} → Lv.${facility.level + 1} (비용: ${(upgradeCost / 100000000).toFixed(1)}억 원)`);
   };
 
-  // 저장/불러오기 기능 제거됨
-  // const handleSave = () => { ... }
-  // const handleLoad = () => { ... }
+  // 저장 기능
+  const handleSave = useCallback(() => {
+    try {
+      const saveData = {
+        messages: messagesRef.current,
+        gameState,
+        facilities,
+        newsItems,
+        readNewsCount, // 읽은 뉴스 개수도 저장
+        selectedTeam: selectedTeam, // 팀 전체 정보 저장
+        timestamp: new Date().toISOString(),
+      };
+      localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+      playSound('success');
+      alert('게임이 저장되었습니다!');
+    } catch (e) {
+      console.error('저장 오류:', e);
+      alert('저장에 실패했습니다.');
+    }
+  }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, playSound]);
+
+  // 불러오기 기능
+  const handleLoad = useCallback(async () => {
+    try {
+      const savedData = localStorage.getItem(SAVE_KEY);
+      if (!savedData) {
+        alert('저장된 게임이 없습니다.');
+        return;
+      }
+
+      const parsed = JSON.parse(savedData);
+      
+      if (!parsed.messages || !Array.isArray(parsed.messages)) {
+        alert('저장 데이터가 손상되었습니다.');
+        return;
+      }
+
+      // 모델이 준비되지 않았으면 대기
+      if (!modelRef.current) {
+        alert('API 연결을 기다리는 중입니다. 잠시 후 다시 시도해주세요.');
+        return;
+      }
+
+      // 메시지 복원
+      setMessages(parsed.messages);
+      messagesRef.current = parsed.messages;
+
+      // 게임 상태 복원
+      if (parsed.gameState) {
+        setGameState(parsed.gameState);
+      }
+      if (parsed.facilities) {
+        setFacilities(parsed.facilities);
+      }
+      if (parsed.newsItems) {
+        setNewsItems(parsed.newsItems);
+      }
+      if (parsed.readNewsCount !== undefined) {
+        setReadNewsCount(parsed.readNewsCount);
+      }
+
+      // **핵심**: 모델에 메시지 히스토리 복원하여 API 연결 유지
+      if (parsed.messages.length > 0) {
+        const history = parsed.messages.map((msg: Message) => ({
+          role: msg.isUser ? 'user' : 'model',
+          parts: [{ text: msg.text }],
+        }));
+
+        chatInstanceRef.current = modelRef.current.startChat({
+          history: history,
+        });
+      }
+
+      playSound('success');
+      alert('게임을 불러왔습니다!');
+    } catch (e) {
+      console.error('불러오기 오류:', e);
+      alert('불러오기에 실패했습니다.');
+    }
+  }, [playSound]);
 
   // GUI 이벤트 핸들러
   const handlePlayerSelect = useCallback((player: Player) => {
@@ -540,8 +627,14 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
         season="2026 시즌"
         onApiKeyClick={onResetApiKey}
         onFacilityClick={() => setIsFacilityOpen(true)}
-        onNewsClick={() => setIsNewsOpen(true)}
-        newsCount={newsItems.length}
+        onNewsClick={() => {
+          setIsNewsOpen(true);
+          // 뉴스를 열면 읽은 것으로 표시 (알림 제거)
+          setReadNewsCount(newsItems.length);
+        }}
+        onSaveClick={handleSave}
+        onLoadClick={handleLoad}
+        newsCount={Math.max(0, newsItems.length - readNewsCount)}
       />
 
       {/* 메인 - 채팅 영역 */}
@@ -687,24 +780,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
         )}
       </AnimatePresence>
 
-      {/* 이벤트 모달 */}
-      <AnimatePresence>
-        {gamePhase === 'EVENT_MODAL' && guiEvent && (
-          <EventModal
-            isOpen={true}
-            type={guiEvent.type === 'RECRUIT' ? 'FA' : (guiEvent.type as 'DRAFT' | 'FA' | 'TRADE')}
-            title={
-              guiEvent.type === 'RECRUIT' ? (guiEvent.title || '선수 영입') :
-              guiEvent.type === 'DRAFT' ? '신인 드래프트' :
-              guiEvent.type === 'FA' ? 'FA 시장' :
-              '트레이드 제안'
-            }
-            players={guiEvent.data?.players || []}
-            onSelect={handlePlayerSelect}
-            onClose={handleEventModalClose}
-          />
-        )}
-      </AnimatePresence>
+      {/* 이벤트 모달 - 선수 목록 모달은 표시하지 않음 */}
 
       {/* 협상 입력 */}
       <AnimatePresence>

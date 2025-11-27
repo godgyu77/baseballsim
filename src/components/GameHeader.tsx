@@ -1,4 +1,4 @@
-import { Calendar, DollarSign, Building2, Trophy, KeyRound, Settings, Newspaper } from 'lucide-react';
+import { Calendar, DollarSign, Building2, Trophy, KeyRound, Settings, Newspaper, Save, FolderOpen } from 'lucide-react';
 
 interface GameHeaderProps {
   teamName?: string;
@@ -8,6 +8,8 @@ interface GameHeaderProps {
   onApiKeyClick?: () => void;
   onFacilityClick?: () => void;
   onNewsClick?: () => void;
+  onSaveClick?: () => void;
+  onLoadClick?: () => void;
   newsCount?: number;
 }
 
@@ -19,6 +21,8 @@ export default function GameHeader({
   onApiKeyClick,
   onFacilityClick,
   onNewsClick,
+  onSaveClick,
+  onLoadClick,
   newsCount = 0
 }: GameHeaderProps) {
   // budget이 null이거나 0이면 "시즌 준비 중" 표시
@@ -40,9 +44,27 @@ export default function GameHeader({
           </div>
           
           <div className="flex items-center gap-1 sm:gap-2 lg:gap-4 flex-shrink-0 flex-wrap">
-            {/* 시설 관리, 뉴스 및 API 키 설정 버튼 */}
-            {(onFacilityClick || onNewsClick || onApiKeyClick) && (
+            {/* 시설 관리, 뉴스, 저장/불러오기 및 API 키 설정 버튼 */}
+            {(onFacilityClick || onNewsClick || onSaveClick || onLoadClick || onApiKeyClick) && (
               <div className="flex items-center gap-1 sm:gap-2 border-r border-baseball-gold/40 pr-1 sm:pr-2 lg:pr-4">
+                {onSaveClick && (
+                  <button
+                    onClick={onSaveClick}
+                    className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
+                    title="게임 저장"
+                  >
+                    <Save className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
+                  </button>
+                )}
+                {onLoadClick && (
+                  <button
+                    onClick={onLoadClick}
+                    className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
+                    title="게임 불러오기"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
+                  </button>
+                )}
                 {onFacilityClick && (
                   <button
                     onClick={onFacilityClick}

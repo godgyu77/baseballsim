@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { FileText, Sparkles } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { motion } from 'framer-motion';
 import { parseAIResponse } from '../lib/utils';
+import { PlayerCardData } from './PlayerCard';
 
 interface MessageBubbleProps {
   message: string;
@@ -93,6 +94,7 @@ function MessageBubble({
               tr: ({ children }: any) => {
                 // tr의 자식들을 배열로 변환하여 인덱스 추적
                 const childrenArray = React.Children.toArray(children);
+                
                 return (
                   <tr className="hover:bg-green-50 transition-colors cursor-default">
                     {React.Children.map(childrenArray, (child, index) => {
