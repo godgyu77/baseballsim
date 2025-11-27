@@ -1,16 +1,20 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { getGeminiModel } from '../lib/gemini';
 import GameHeader from './GameHeader';
 import MessageBubble from './MessageBubble';
 import LoadingOverlay from './LoadingOverlay';
 import EventModal, { Player } from './EventModal';
 import NegotiationInput from './NegotiationInput';
-import NewsSidebar from './NewsSidebar';
-import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent } from '../lib/utils';
+import RandomEventModal from './RandomEventModal';
+import FacilityManagement from './FacilityManagement';
+import OptionsModal from './OptionsModal';
+import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState } from '../lib/utils';
 import { Team } from '../constants/TeamData';
 import { useSound } from '../hooks/useSound';
+import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
+import { createInitialFacilityState, FACILITY_DEFINITIONS } from '../constants/Facilities';
 
 interface Message {
   text: string;
@@ -23,7 +27,8 @@ interface ChatInterfaceProps {
   onResetApiKey?: () => void;
 }
 
-const SAVE_KEY = 'baseball_game_save';
+// 저장/불러오기 기능 제거됨
+// const SAVE_KEY = 'baseball_game_save';
 
 export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -31,15 +36,30 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
   const [isLoading, setIsLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
   const [currentOptions, setCurrentOptions] = useState<Array<{ label: string; value: string }>>([]);
-  const [gameState, setGameState] = useState<{ date: string | null; budget: number | null }>({
+  const [gameState, setGameState] = useState<{ 
+    date: string | null; 
+    budget: number | null;
+    morale: number; // 팀 사기 (0 ~ 100)
+    fanLoyalty: number; // 팬 충성도 (0 ~ 100)
+  }>({
     date: null,
     budget: null, // 초기값은 null (0이 아닌 null로 명확히 구분)
+    morale: 50, // 초기값 50
+    fanLoyalty: 50, // 초기값 50
   });
   const [gamePhase, setGamePhase] = useState<GamePhase>('MAIN_GAME');
   const [guiEvent, setGuiEvent] = useState<GUIEvent | null>(null);
   const [negotiationPlayer, setNegotiationPlayer] = useState<string | null>(null);
   const [isModelReady, setIsModelReady] = useState(false);
-  const [isNewsOpen, setIsNewsOpen] = useState(false);
+  const [randomEvent, setRandomEvent] = useState<RandomEvent | null>(null);
+  const [isRandomEventOpen, setIsRandomEventOpen] = useState(false);
+  const [isFacilityOpen, setIsFacilityOpen] = useState(false);
+  const [facilities, setFacilities] = useState<FacilityState>(createInitialFacilityState());
+  const [loadingStatusText, setLoadingStatusText] = useState<string | undefined>(undefined);
+  const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
+  const [pendingOptions, setPendingOptions] = useState<Array<{ label: string; value: string }>>([]);
+  // 뉴스 기능 제거됨
+  // const [isNewsOpen, setIsNewsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInstanceRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
@@ -130,8 +150,10 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
     setInput('');
     setMessages((prev) => [...prev, { text: userMessage, isUser: true }]);
     setIsLoading(true);
-    setStreamingMessage('');
+    setStreamingMessage(''); // 스트리밍 텍스트는 숨김
     setCurrentOptions([]);
+    setLoadingStatusText(undefined);
+    setIsOptionsModalOpen(false);
 
     try {
       if (!modelRef.current) {
@@ -161,9 +183,19 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
             const chunkText = chunk.text();
             if (chunkText) {
               fullText += chunkText;
-              setStreamingMessage(fullText);
+              // 스트리밍 텍스트는 내부적으로만 저장 (화면에는 표시 안 함)
+              // setStreamingMessage(fullText); // 주석 처리 - 로딩 화면만 표시
               
-              // 스트리밍 중에도 옵션 파싱 시도
+              // 키워드 기반 상태 텍스트 업데이트 (진행률은 LoadingOverlay에서 자동 관리)
+              if (fullText.includes('선수') || fullText.includes('명단')) {
+                setLoadingStatusText('선수 데이터를 확인 중입니다...');
+              } else if (fullText.includes('자금') || fullText.includes('예산')) {
+                setLoadingStatusText('재무 상태를 분석 중입니다...');
+              } else if (fullText.includes('표') || fullText.includes('명단')) {
+                setLoadingStatusText('보고서를 작성 중입니다...');
+              }
+              
+              // 스트리밍 중에도 옵션 파싱 시도 (내부적으로만)
               const parsed = parseAIResponse(fullText);
               if (parsed.options.length > 0) {
                 setCurrentOptions(parsed.options);
@@ -180,14 +212,27 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
         
         if (finalText && finalText !== fullText) {
           fullText = finalText;
-          setStreamingMessage(fullText);
         }
+
+        // 로딩 완료 (진행률은 LoadingOverlay에서 자동으로 100% 처리)
+        setLoadingStatusText('완료!');
 
         if (fullText) {
           // 최종 메시지에서 옵션 및 GUI 이벤트 파싱
           const parsed = parseAIResponse(fullText);
-          setMessages((prev) => [...prev, { text: fullText, isUser: false }]);
-          setCurrentOptions(parsed.options);
+          // 파싱된 텍스트만 저장 (JSON 태그 제거된 깨끗한 텍스트)
+          setMessages((prev) => [...prev, { text: parsed.text, isUser: false }]);
+          
+          // 옵션이 있으면 플로팅 버튼만 표시 (모달은 즉시 띄우지 않음)
+          if (parsed.options.length > 0) {
+            setPendingOptions(parsed.options);
+            setCurrentOptions(parsed.options);
+            // 모달은 즉시 띄우지 않고, 플로팅 버튼만 표시
+            setIsOptionsModalOpen(false);
+          } else {
+            setCurrentOptions([]);
+            setPendingOptions([]);
+          }
           
           // GUI 이벤트 처리
           if (parsed.guiEvent) {
@@ -216,8 +261,18 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
           const text = response.text();
           if (text) {
             const parsed = parseAIResponse(text);
-            setMessages((prev) => [...prev, { text, isUser: false }]);
-            setCurrentOptions(parsed.options);
+            // 파싱된 텍스트만 저장 (JSON 태그 제거된 깨끗한 텍스트)
+            setMessages((prev) => [...prev, { text: parsed.text, isUser: false }]);
+            
+            // 옵션이 있으면 플로팅 버튼만 표시 (모달은 즉시 띄우지 않음)
+            if (parsed.options.length > 0) {
+              setPendingOptions(parsed.options);
+              setCurrentOptions(parsed.options);
+              setIsOptionsModalOpen(false);
+            } else {
+              setCurrentOptions([]);
+              setPendingOptions([]);
+            }
             
             // GUI 이벤트 처리
             if (parsed.guiEvent) {
@@ -240,6 +295,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
         }
       } finally {
         setStreamingMessage('');
+        setLoadingStatusText(undefined);
       }
     } catch (error: any) {
       console.error('Error:', error);
@@ -253,6 +309,8 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
       ]);
       setStreamingMessage('');
       setCurrentOptions([]);
+      setPendingOptions([]);
+      setLoadingStatusText(undefined);
     } finally {
       setIsLoading(false);
     }
@@ -265,51 +323,140 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
 
   const handleOptionClick = (value: string) => {
     playSound('click');
+    
+    // "다음 날로 진행" 같은 날짜 진행 명령인지 확인 (더 정확한 패턴 매칭)
+    const dateProgressPatterns = [
+      /다음\s*(날|일|날짜|하루)/,
+      /(하루|날짜|일정)\s*(진행|넘기|건너뛰)/,
+      /(진행|넘기|건너뛰)\s*(하루|날짜|일정)/,
+    ];
+    
+    const isDateProgress = dateProgressPatterns.some(pattern => pattern.test(value));
+    
+    if (isDateProgress) {
+      // 랜덤 이벤트 발생 체크
+      if (Math.random() < RANDOM_EVENT_CHANCE) {
+        const availableEvents = RANDOM_EVENTS;
+        const randomIndex = Math.floor(Math.random() * availableEvents.length);
+        const selectedEvent = { ...availableEvents[randomIndex] };
+        setRandomEvent(selectedEvent);
+        setIsRandomEventOpen(true);
+        playSound('swoosh');
+        // 이벤트 모달이 열려있으면 메시지 전송은 이벤트 처리 후에 하도록 지연
+        // (이벤트 모달이 닫힐 때까지 대기하지 않고, 이벤트 발생만 표시)
+        // 실제 날짜 진행은 AI가 처리하므로 메시지는 그대로 전송
+      }
+    }
+    
     handleSend(value);
   };
 
-  // 세이브 기능
-  const handleSave = () => {
-    try {
-      const saveData = {
-        messages,
-        gameState,
-        timestamp: new Date().toISOString(),
-      };
-      localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
-      alert('게임이 저장되었습니다.');
-    } catch (error) {
-      console.error('저장 오류:', error);
-      alert('저장 중 오류가 발생했습니다.');
-    }
-  };
-
-  // 불러오기 기능
-  const handleLoad = () => {
-    try {
-      const savedData = localStorage.getItem(SAVE_KEY);
-      if (!savedData) {
-        alert('저장된 파일이 없습니다.');
-        return;
-      }
-
-      const parsed = JSON.parse(savedData);
-      if (parsed.messages && Array.isArray(parsed.messages)) {
-        setMessages(parsed.messages);
-        if (parsed.gameState) {
-          setGameState(parsed.gameState);
+  // 랜덤 이벤트 효과 적용
+  const applyEventEffect = (effect: RandomEvent['effect']) => {
+    setGameState((prev) => {
+      const newState = { ...prev };
+      
+      if (effect.budget !== undefined && newState.budget !== null) {
+        const oldBudget = newState.budget;
+        newState.budget = Math.max(0, newState.budget + effect.budget);
+        const change = newState.budget - oldBudget;
+        
+        // 자금 변동이 있으면 콘솔에 로그 (디버깅용)
+        if (change !== 0) {
+          console.log(`[랜덤 이벤트] 자금 변동: ${change > 0 ? '+' : ''}${(change / 100000000).toFixed(1)}억 원`);
         }
-        // 채팅 인스턴스 초기화 (새로운 히스토리로 시작)
-        chatInstanceRef.current = null;
-        alert('게임을 불러왔습니다.');
-      } else {
-        alert('저장 파일 형식이 올바르지 않습니다.');
       }
-    } catch (error) {
-      console.error('불러오기 오류:', error);
-      alert('불러오기 중 오류가 발생했습니다.');
+      
+      if (effect.morale !== undefined) {
+        const oldMorale = newState.morale;
+        newState.morale = Math.max(0, Math.min(100, newState.morale + effect.morale));
+        const change = newState.morale - oldMorale;
+        if (change !== 0) {
+          console.log(`[랜덤 이벤트] 팀 사기 변동: ${change > 0 ? '+' : ''}${change}`);
+        }
+      }
+      
+      if (effect.fanLoyalty !== undefined) {
+        const oldLoyalty = newState.fanLoyalty;
+        newState.fanLoyalty = Math.max(0, Math.min(100, newState.fanLoyalty + effect.fanLoyalty));
+        const change = newState.fanLoyalty - oldLoyalty;
+        if (change !== 0) {
+          console.log(`[랜덤 이벤트] 팬 충성도 변동: ${change > 0 ? '+' : ''}${change}`);
+        }
+      }
+      
+      // playerCondition은 추후 선수 시스템에 반영
+      // if (effect.playerCondition !== undefined) { ... }
+      
+      return newState;
+    });
+  };
+
+  // 랜덤 이벤트 선택 처리
+  const handleEventChoice = (choiceIndex: number) => {
+    if (randomEvent && randomEvent.choices && randomEvent.choices[choiceIndex]) {
+      const selectedChoice = randomEvent.choices[choiceIndex];
+      applyEventEffect(selectedChoice.effect);
     }
   };
+
+  // 랜덤 이벤트 닫기
+  const handleRandomEventClose = () => {
+    if (randomEvent && !randomEvent.choices) {
+      // 선택이 없는 이벤트는 바로 효과 적용
+      applyEventEffect(randomEvent.effect);
+    }
+    setIsRandomEventOpen(false);
+    setRandomEvent(null);
+  };
+
+  // 시설 업그레이드
+  const handleFacilityUpgrade = (type: FacilityType) => {
+    const facility = facilities[type];
+    const definition = FACILITY_DEFINITIONS.find((f) => f.type === type);
+    
+    if (!definition) {
+      console.error(`[시설 업그레이드] 정의를 찾을 수 없습니다: ${type}`);
+      return;
+    }
+    
+    if (facility.level >= definition.maxLevel) {
+      console.warn(`[시설 업그레이드] 이미 최대 레벨입니다: ${type} (Lv.${facility.level})`);
+      return;
+    }
+    
+    const upgradeCost = definition.upgradeCost(facility.level);
+    
+    if (gameState.budget === null) {
+      console.warn('[시설 업그레이드] 자금 정보가 없습니다.');
+      return;
+    }
+    
+    if (gameState.budget < upgradeCost) {
+      console.warn(`[시설 업그레이드] 자금이 부족합니다. 필요: ${(upgradeCost / 100000000).toFixed(1)}억 원, 보유: ${(gameState.budget / 100000000).toFixed(1)}억 원`);
+      return;
+    }
+    
+    setGameState((prev) => ({
+      ...prev,
+      budget: prev.budget! - upgradeCost,
+    }));
+    
+    setFacilities((prev) => ({
+      ...prev,
+      [type]: {
+        ...prev[type],
+        level: prev[type].level + 1,
+      },
+    }));
+    
+    playSound('coin');
+    console.log(`[시설 업그레이드] ${definition.name} Lv.${facility.level} → Lv.${facility.level + 1} (비용: ${(upgradeCost / 100000000).toFixed(1)}억 원)`);
+  };
+
+  // 저장/불러오기 기능 제거됨
+  // const handleSave = () => { ... }
+  // const handleLoad = () => { ... }
 
   // GUI 이벤트 핸들러
   const handlePlayerSelect = (player: Player) => {
@@ -332,13 +479,11 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
     setGuiEvent(null);
   };
 
-  // 마지막 AI 메시지에서 옵션 추출 (표시용)
-  const lastAIMessage = messages.filter(m => !m.isUser).slice(-1)[0];
-  const displayOptions = streamingMessage 
-    ? currentOptions 
-    : lastAIMessage 
-      ? parseAIResponse(lastAIMessage.text).options 
-      : [];
+  // 옵션 모달 닫기 핸들러
+  const handleOptionsModalClose = () => {
+    setIsOptionsModalOpen(false);
+    // 모달을 닫아도 옵션은 유지 (플로팅 버튼으로 다시 열 수 있음)
+  };
 
   return (
     <div className="flex flex-col h-screen bg-[#Fdfbf7]">
@@ -348,10 +493,8 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
         budget={gameState.budget}
         date={gameState.date}
         season="2026 시즌"
-        onSave={handleSave}
-        onLoad={handleLoad}
-        onNewsClick={() => setIsNewsOpen(true)}
         onApiKeyClick={onResetApiKey}
+        onFacilityClick={() => setIsFacilityOpen(true)}
       />
 
       {/* 메인 - 채팅 영역 */}
@@ -364,62 +507,118 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
               isUser={msg.isUser}
             />
           ))}
-          {streamingMessage && (
-            <MessageBubble
-              message={streamingMessage}
-              isUser={false}
-              isStreaming={true}
-            />
-          )}
+          {/* 스트리밍 중에는 텍스트를 표시하지 않음 (로딩 오버레이만 표시) */}
           <div ref={messagesEndRef} />
         </div>
       </div>
 
       {/* 푸터 - 입력 영역 */}
-      <div className="border-t border-gray-300 bg-gray-50 shadow-lg">
-        {/* 선택지 버튼 (작전 지시 패널) */}
-        {displayOptions.length > 0 && !isLoading && (
-          <div className="px-4 pt-3 pb-2 border-b border-gray-300 bg-white">
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">작전 지시</div>
-            <div className="flex flex-wrap gap-2">
-              {displayOptions.map((option, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleOptionClick(option.value)}
-                  disabled={isLoading}
-                  className="px-4 py-2 bg-white border-2 border-gray-300 hover:border-baseball-green hover:bg-baseball-green/5 disabled:bg-gray-200 disabled:border-gray-200 disabled:cursor-not-allowed text-baseball-green text-sm font-semibold rounded transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0"
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+      <div className="border-t-2 border-baseball-green/20 bg-gradient-to-b from-gray-50 to-white shadow-2xl">
+        {/* 선택지 버튼 패널 제거됨 - 모달로 대체 */}
 
         {/* 입력 폼 */}
         <form onSubmit={handleSubmit} className="p-4">
-          <div className="flex gap-2 max-w-5xl mx-auto">
-            <input
+          <div className="flex gap-3 max-w-5xl mx-auto">
+            <motion.input
+              whileFocus={{ scale: 1.01 }}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="명령을 입력하세요..."
-              className="flex-1 px-4 py-2.5 border-2 border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-baseball-green focus:border-transparent disabled:bg-gray-100 font-sans"
+              className="flex-1 px-5 py-3 border-2 border-baseball-green/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green/50 focus:border-baseball-green disabled:bg-gray-100 font-sans shadow-sm focus:shadow-md transition-all"
               disabled={isLoading}
             />
-            <button
+            <motion.button
               type="submit"
               disabled={isLoading || !input.trim()}
-              className="px-6 py-2.5 bg-baseball-green hover:bg-baseball-green-dark disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 border-b-2 border-baseball-green-dark"
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              className="px-7 py-3 bg-gradient-to-r from-baseball-green to-[#0a3528] hover:from-baseball-green-dark hover:to-[#08251f] disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white font-bold rounded-lg transition-all shadow-lg hover:shadow-xl active:shadow-md border-b-2 border-baseball-green-dark/50"
             >
               <Send className="w-5 h-5" />
-            </button>
+            </motion.button>
           </div>
         </form>
       </div>
 
-      {/* 로딩 오버레이 */}
-      {isLoading && <LoadingOverlay />}
+      {/* 로딩 오버레이 (자동 진행 바 포함) */}
+      <LoadingOverlay 
+        isLoading={isLoading}
+        statusText={loadingStatusText}
+      />
+
+      {/* 선택지 모달 */}
+      <OptionsModal
+        isOpen={isOptionsModalOpen}
+        options={pendingOptions}
+        onSelect={(value) => {
+          handleOptionClick(value);
+          setIsOptionsModalOpen(false);
+          setPendingOptions([]); // 선택 후 옵션 초기화
+        }}
+        onClose={handleOptionsModalClose}
+      />
+
+      {/* 작전 지시 플로팅 버튼 (트리거 방식) */}
+      {!isOptionsModalOpen && !isLoading && pendingOptions.length > 0 && (
+        <motion.button
+          initial={{ opacity: 0, scale: 0, y: 20 }}
+          animate={{ 
+            opacity: 1, 
+            scale: 1, 
+            y: 0,
+          }}
+          exit={{ opacity: 0, scale: 0, y: 20 }}
+          whileHover={{ scale: 1.1, y: -2 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={() => setIsOptionsModalOpen(true)}
+          className="fixed bottom-24 right-4 sm:right-6 z-40 bg-gradient-to-r from-baseball-green to-[#0a3528] text-white px-4 sm:px-5 py-3 sm:py-4 rounded-full shadow-2xl hover:shadow-3xl transition-all border-2 border-baseball-gold/30 flex items-center justify-center gap-2 group"
+          title="작전 지시 확인"
+        >
+          {/* 펄스 애니메이션 링 */}
+          <motion.div
+            className="absolute inset-0 rounded-full bg-baseball-green/30"
+            animate={{
+              scale: [1, 1.3, 1],
+              opacity: [0.5, 0, 0.5],
+            }}
+            transition={{
+              duration: 2,
+              repeat: Infinity,
+              ease: "easeInOut",
+            }}
+          />
+          
+          {/* 버튼 내용 */}
+          <motion.span
+            animate={{
+              scale: [1, 1.05, 1],
+            }}
+            transition={{
+              duration: 2,
+              repeat: Infinity,
+              ease: "easeInOut",
+            }}
+            className="text-lg sm:text-xl relative z-10"
+          >
+            📋
+          </motion.span>
+          <span className="text-xs sm:text-sm font-bold hidden sm:inline whitespace-nowrap relative z-10">
+            작전 지시
+          </span>
+          
+          {/* 알림 뱃지 (선택지 개수) */}
+          {pendingOptions.length > 0 && (
+            <motion.span
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              className="absolute -top-1 -right-1 bg-baseball-gold text-baseball-green text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white shadow-lg relative z-10"
+            >
+              {pendingOptions.length}
+            </motion.span>
+          )}
+        </motion.button>
+      )}
 
       {/* 이벤트 모달 */}
       <AnimatePresence>
@@ -453,10 +652,23 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
         )}
       </AnimatePresence>
 
-      {/* 뉴스 사이드바 */}
-      <NewsSidebar
-        isOpen={isNewsOpen}
-        onClose={() => setIsNewsOpen(false)}
+      {/* 뉴스 사이드바 제거됨 */}
+
+      {/* 랜덤 이벤트 모달 */}
+      <RandomEventModal
+        event={randomEvent}
+        isOpen={isRandomEventOpen}
+        onClose={handleRandomEventClose}
+        onChoiceSelect={handleEventChoice}
+      />
+
+      {/* 시설 관리 모달 */}
+      <FacilityManagement
+        isOpen={isFacilityOpen}
+        onClose={() => setIsFacilityOpen(false)}
+        facilities={facilities}
+        budget={gameState.budget}
+        onUpgrade={handleFacilityUpgrade}
       />
 
     </div>

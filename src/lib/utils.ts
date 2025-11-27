@@ -9,7 +9,49 @@ export interface GUIEvent {
   data: any;
 }
 
-export type GamePhase = 'TEAM_SELECTION' | 'MAIN_GAME' | 'EVENT_MODAL' | 'NEGOTIATION';
+export type GamePhase = 'TEAM_SELECTION' | 'MAIN_GAME' | 'EVENT_MODAL' | 'NEGOTIATION' | 'RANDOM_EVENT' | 'FACILITY_MANAGEMENT';
+
+// 랜덤 이벤트 관련 타입
+export type EventType = 'positive' | 'negative' | 'choice';
+
+export interface RandomEvent {
+  id: string;
+  type: EventType;
+  title: string;
+  message: string;
+  effect: {
+    budget?: number; // 자금 변동 (원 단위)
+    morale?: number; // 팀 사기 변동 (-100 ~ 100)
+    playerCondition?: number; // 선수 컨디션 변동 (-100 ~ 100)
+    fanLoyalty?: number; // 팬 충성도 변동 (-100 ~ 100)
+  };
+  choices?: Array<{
+    label: string;
+    effect: RandomEvent['effect'];
+  }>;
+}
+
+// 구단 시설 관련 타입
+export type FacilityType = 'training' | 'medical' | 'marketing' | 'scouting';
+
+export interface Facility {
+  type: FacilityType;
+  name: string;
+  level: number;
+  maxLevel: number;
+  upgradeCost: (level: number) => number; // 레벨별 업그레이드 비용 함수
+  effect: (level: number) => {
+    description: string;
+    value: number;
+  };
+}
+
+export interface FacilityState {
+  training: Facility;
+  medical: Facility;
+  marketing: Facility;
+  scouting: Facility;
+}
 
 /**
  * AI 응답에서 OPTIONS JSON을 파싱하여 텍스트와 선택지를 분리합니다.
@@ -85,9 +127,13 @@ export function parseAIResponse(message: string): ParsedMessage {
     if (endIndex !== -1) {
       try {
         const jsonStr = text.substring(startIndex, endIndex + 1);
-        guiEvent = JSON.parse(jsonStr);
+        // JSON 유효성 검사 (빈 문자열이나 불완전한 JSON 체크)
+        if (jsonStr.trim().length > 0) {
+          guiEvent = JSON.parse(jsonStr);
+        }
       } catch (e) {
-        console.error('GUI 이벤트 파싱 오류:', e);
+        // 파싱 오류 발생 시 로그만 남기고 계속 진행 (태그는 나중에 제거됨)
+        console.warn('GUI 이벤트 파싱 오류 (태그는 자동 제거됨):', e);
       }
     }
   }

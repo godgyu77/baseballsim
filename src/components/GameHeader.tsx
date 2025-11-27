@@ -1,14 +1,12 @@
-import { Calendar, DollarSign, Building2, Trophy, Save, Download, Newspaper, KeyRound } from 'lucide-react';
+import { Calendar, DollarSign, Building2, Trophy, KeyRound, Settings } from 'lucide-react';
 
 interface GameHeaderProps {
   teamName?: string;
   budget?: number | null;
   date?: string | null;
   season?: string;
-  onSave?: () => void;
-  onLoad?: () => void;
-  onNewsClick?: () => void;
   onApiKeyClick?: () => void;
+  onFacilityClick?: () => void;
 }
 
 export default function GameHeader({ 
@@ -16,10 +14,8 @@ export default function GameHeader({
   budget = null, 
   date = null,
   season = '2026 시즌',
-  onSave,
-  onLoad,
-  onNewsClick,
-  onApiKeyClick
+  onApiKeyClick,
+  onFacilityClick
 }: GameHeaderProps) {
   // budget이 null이거나 0이면 "시즌 준비 중" 표시
   const displayBudget = (budget !== null && budget > 0) ? budget.toLocaleString('ko-KR') + '원' : '시즌 준비 중';
@@ -40,45 +36,29 @@ export default function GameHeader({
           </div>
           
           <div className="flex items-center gap-1 sm:gap-2 lg:gap-4 flex-shrink-0 flex-wrap">
-            {/* 아이콘 버튼들 */}
-            <div className="flex items-center gap-1 sm:gap-2 border-r border-baseball-gold/40 pr-1 sm:pr-2 lg:pr-4">
-              {onNewsClick && (
-                <button
-                  onClick={onNewsClick}
-                  className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
-                  title="뉴스"
-                >
-                  <Newspaper className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
-                </button>
-              )}
-              {onSave && (
-                <button
-                  onClick={onSave}
-                  className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
-                  title="게임 저장"
-                >
-                  <Save className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
-                </button>
-              )}
-              {onLoad && (
-                <button
-                  onClick={onLoad}
-                  className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
-                  title="게임 불러오기"
-                >
-                  <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
-                </button>
-              )}
-              {onApiKeyClick && (
-                <button
-                  onClick={onApiKeyClick}
-                  className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
-                  title="API 키 설정"
-                >
-                  <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
-                </button>
-              )}
-            </div>
+            {/* 시설 관리 및 API 키 설정 버튼 */}
+            {(onFacilityClick || onApiKeyClick) && (
+              <div className="flex items-center gap-1 sm:gap-2 border-r border-baseball-gold/40 pr-1 sm:pr-2 lg:pr-4">
+                {onFacilityClick && (
+                  <button
+                    onClick={onFacilityClick}
+                    className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
+                    title="시설 관리"
+                  >
+                    <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
+                  </button>
+                )}
+                {onApiKeyClick && (
+                  <button
+                    onClick={onApiKeyClick}
+                    className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors"
+                    title="API 키 설정"
+                  >
+                    <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-baseball-gold" />
+                  </button>
+                )}
+              </div>
+            )}
 
             <span className="hidden sm:inline text-baseball-gold/60">|</span>
             

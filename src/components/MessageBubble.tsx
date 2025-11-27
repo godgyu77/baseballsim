@@ -1,7 +1,8 @@
 import React from 'react';
-import { FileText } from 'lucide-react';
+import { FileText, Sparkles } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { motion } from 'framer-motion';
 import { parseAIResponse } from '../lib/utils';
 
 interface MessageBubbleProps {
@@ -20,29 +21,52 @@ export default function MessageBubble({
   // 사용자 메시지는 최소화된 로그 형태로 표시
   if (isUser) {
     return (
-      <div className="mb-3 flex justify-end">
-        <div className="bg-gray-100 border border-gray-200 rounded px-3 py-1.5 text-xs text-gray-600 font-mono">
-          <span className="text-gray-400">[지시]</span> {parsed.text}
+      <motion.div
+        initial={{ opacity: 0, x: 20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.3 }}
+        className="mb-3 flex justify-end"
+      >
+        <div className="bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 border-2 border-baseball-green/30 rounded-lg px-4 py-2 text-xs text-gray-700 font-mono shadow-sm hover:shadow-md transition-all hover:border-baseball-green/50">
+          <span className="text-baseball-green font-semibold">[지시]</span> {parsed.text}
         </div>
-      </div>
+      </motion.div>
     );
   }
 
-  // AI 메시지는 보고서 카드 형태로 표시
+  // AI 메시지는 게임스러운 카드 형태로 표시
   return (
-    <div className="mb-4">
-      <div className="bg-white border border-gray-200 rounded shadow-sm hover:shadow-md transition-shadow">
-        {/* 보고서 헤더 */}
-        <div className="bg-gray-50 border-b border-gray-200 px-4 py-2 flex items-center gap-2">
-          <FileText className="w-4 h-4 text-baseball-green" />
-          <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">GM OFFICE REPORT</span>
-          <span className="text-xs text-gray-400 ml-auto font-mono">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: "easeOut" }}
+      className="mb-4"
+    >
+      <div className="bg-gradient-to-br from-white to-gray-50/50 border-2 border-baseball-green/20 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 hover:border-baseball-green/40 hover:-translate-y-1 overflow-hidden">
+        {/* 게임스러운 헤더 */}
+        <div className="bg-gradient-to-r from-baseball-green to-[#0a3528] border-b-2 border-baseball-gold/30 px-4 py-3 flex items-center gap-2 shadow-md">
+          <div className="relative">
+            <FileText className="w-5 h-5 text-baseball-gold" />
+            {isStreaming && (
+              <motion.div
+                animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }}
+                transition={{ repeat: Infinity, duration: 1.5 }}
+                className="absolute -top-1 -right-1"
+              >
+                <Sparkles className="w-3 h-3 text-yellow-400" />
+              </motion.div>
+            )}
+          </div>
+          <span className="text-xs font-bold text-white uppercase tracking-wider drop-shadow-sm">
+            GM OFFICE REPORT
+          </span>
+          <span className="text-xs text-baseball-gold/80 ml-auto font-mono font-semibold">
             {new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>
 
-        {/* 보고서 본문 */}
-        <div className="px-4 py-3 text-sm text-gray-800">
+        {/* 게임스러운 본문 */}
+        <div className="px-4 py-4 text-sm text-gray-800 bg-white/50">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -152,10 +176,30 @@ export default function MessageBubble({
             {parsed.text}
           </ReactMarkdown>
           {isStreaming && (
-            <span className="inline-block w-2 h-4 bg-baseball-green animate-pulse ml-1" />
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="inline-flex items-center gap-1 ml-2"
+            >
+              <motion.span
+                animate={{ opacity: [0.3, 1, 0.3] }}
+                transition={{ repeat: Infinity, duration: 1, ease: "easeInOut" }}
+                className="inline-block w-2 h-4 bg-baseball-green rounded-full"
+              />
+              <motion.span
+                animate={{ opacity: [0.3, 1, 0.3] }}
+                transition={{ repeat: Infinity, duration: 1, delay: 0.2, ease: "easeInOut" }}
+                className="inline-block w-2 h-4 bg-baseball-green rounded-full"
+              />
+              <motion.span
+                animate={{ opacity: [0.3, 1, 0.3] }}
+                transition={{ repeat: Infinity, duration: 1, delay: 0.4, ease: "easeInOut" }}
+                className="inline-block w-2 h-4 bg-baseball-green rounded-full"
+              />
+            </motion.div>
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
