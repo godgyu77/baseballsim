@@ -11,7 +11,7 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
 }
 
-export default function MessageBubble({ 
+function MessageBubble({ 
   message, 
   isUser, 
   isStreaming
@@ -203,3 +203,11 @@ export default function MessageBubble({
     </motion.div>
   );
 }
+
+// React.memo로 불필요한 재렌더링 방지
+// text와 isUser가 동일하면 리렌더링 건너뛰기
+export default React.memo(MessageBubble, (prevProps, nextProps) => {
+  return prevProps.message === nextProps.message && 
+         prevProps.isUser === nextProps.isUser &&
+         prevProps.isStreaming === nextProps.isStreaming;
+});

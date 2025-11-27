@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { getGeminiModel } from '../lib/gemini';
@@ -10,7 +10,8 @@ import NegotiationInput from './NegotiationInput';
 import RandomEventModal from './RandomEventModal';
 import FacilityManagement from './FacilityManagement';
 import OptionsModal from './OptionsModal';
-import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState } from '../lib/utils';
+import NewsSidebar, { NewsItem } from './NewsSidebar';
+import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo } from '../lib/utils';
 import { Team } from '../constants/TeamData';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
@@ -34,7 +35,6 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [streamingMessage, setStreamingMessage] = useState('');
   const [currentOptions, setCurrentOptions] = useState<Array<{ label: string; value: string }>>([]);
   const [gameState, setGameState] = useState<{ 
     date: string | null; 
@@ -58,18 +58,21 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
   const [loadingStatusText, setLoadingStatusText] = useState<string | undefined>(undefined);
   const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
   const [pendingOptions, setPendingOptions] = useState<Array<{ label: string; value: string }>>([]);
-  // 뉴스 기능 제거됨
-  // const [isNewsOpen, setIsNewsOpen] = useState(false);
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [isNewsOpen, setIsNewsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInstanceRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
+  const messagesRef = useRef<Message[]>([]);
   const { playSound } = useSound();
 
   useEffect(() => {
     if (apiKey) {
-      modelRef.current = getGeminiModel(apiKey);
-      chatInstanceRef.current = null;
-      setIsModelReady(true);
+      (async () => {
+        modelRef.current = await getGeminiModel(apiKey);
+        chatInstanceRef.current = null;
+        setIsModelReady(true);
+      })();
     } else {
       setIsModelReady(false);
     }
@@ -88,8 +91,9 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
   }, [selectedTeam, isModelReady, messages.length]);
 
   useEffect(() => {
+    messagesRef.current = messages;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingMessage]);
+  }, [messages]);
 
   // 메시지 변경 시 헤더 정보 업데이트
   useEffect(() => {
@@ -119,38 +123,25 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
     }
   }, [messages]);
 
-  // 스트리밍 중에도 헤더 정보 업데이트
-  useEffect(() => {
-    if (streamingMessage) {
-      const parsed = parseAIResponse(streamingMessage);
-      
-      const extractedDate = extractDate(parsed.text);
-      if (extractedDate) {
-        setGameState(prev => ({ ...prev, date: extractedDate }));
-      }
-      
-      const extractedBudget = extractBudget(parsed.text);
-      console.log('[자금 파싱 - 스트리밍] 원본 텍스트:', streamingMessage.substring(0, 200));
-      console.log('[자금 파싱 - 스트리밍] 파싱된 텍스트:', parsed.text.substring(0, 200));
-      console.log('[자금 파싱 - 스트리밍] 추출된 자금:', extractedBudget);
-      if (extractedBudget !== null && extractedBudget > 0) { // 0보다 큰 값만 업데이트
-        console.log('[자금 파싱 - 스트리밍] ✅ 자금 업데이트:', extractedBudget.toLocaleString('ko-KR') + '원');
-        setGameState(prev => ({ ...prev, budget: extractedBudget }));
-      } else {
-        console.log('[자금 파싱 - 스트리밍] ❌ 자금 추출 실패 또는 0원');
-      }
-    }
-  }, [streamingMessage]);
 
-  const handleSend = async (messageText: string) => {
-    if (!messageText.trim() || isLoading) return;
+  const isLoadingRef = useRef(false);
+  
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
+
+  const handleSend = useCallback(async (messageText: string) => {
+    if (!messageText.trim() || isLoadingRef.current) return;
 
     playSound('click');
     const userMessage = messageText.trim();
     setInput('');
+    
+    // 사용자 메시지를 먼저 추가
     setMessages((prev) => [...prev, { text: userMessage, isUser: true }]);
+    
+    // 로딩 시작 (임시 말풍선은 추가하지 않음)
     setIsLoading(true);
-    setStreamingMessage(''); // 스트리밍 텍스트는 숨김
     setCurrentOptions([]);
     setLoadingStatusText(undefined);
     setIsOptionsModalOpen(false);
@@ -161,9 +152,12 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
       }
 
       // 채팅 인스턴스가 없으면 새로 생성
+      // messagesRef를 사용하여 최신 메시지 목록 참조 (방금 추가한 사용자 메시지 포함)
       if (!chatInstanceRef.current) {
-        const history = messages.length > 1 
-          ? messages.slice(1, -1).map(msg => ({
+        // 사용자 메시지를 제외한 히스토리 생성 (방금 추가한 메시지 제외)
+        const currentMessages = [...messagesRef.current, { text: userMessage, isUser: true }];
+        const history = currentMessages.length > 1 
+          ? currentMessages.slice(0, -1).map(msg => ({
               role: msg.isUser ? 'user' : 'model',
               parts: [{ text: msg.text }],
             }))
@@ -183,8 +177,6 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
             const chunkText = chunk.text();
             if (chunkText) {
               fullText += chunkText;
-              // 스트리밍 텍스트는 내부적으로만 저장 (화면에는 표시 안 함)
-              // setStreamingMessage(fullText); // 주석 처리 - 로딩 화면만 표시
               
               // 키워드 기반 상태 텍스트 업데이트 (진행률은 LoadingOverlay에서 자동 관리)
               if (fullText.includes('선수') || fullText.includes('명단')) {
@@ -223,6 +215,28 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
           // 파싱된 텍스트만 저장 (JSON 태그 제거된 깨끗한 텍스트)
           setMessages((prev) => [...prev, { text: parsed.text, isUser: false }]);
           
+          // STATUS 태그 처리 (헤더 업데이트)
+          if (parsed.status) {
+            if (parsed.status.date) {
+              setGameState(prev => ({ ...prev, date: parsed.status!.date! }));
+            }
+            if (parsed.status.budget) {
+              // "50억 원" 형식에서 숫자 추출
+              const budgetMatch = parsed.status.budget.match(/([0-9,.]+)\s*억/i);
+              if (budgetMatch) {
+                const amount = parseFloat(budgetMatch[1].replace(/,/g, ''));
+                if (!isNaN(amount) && amount > 0) {
+                  setGameState(prev => ({ ...prev, budget: Math.floor(amount * 100000000) }));
+                }
+              }
+            }
+          }
+          
+          // NEWS 태그 처리 (뉴스 사이드바에 추가)
+          if (parsed.news && parsed.news.length > 0) {
+            setNewsItems(prev => [...prev, ...parsed.news!]);
+          }
+          
           // 옵션이 있으면 플로팅 버튼만 표시 (모달은 즉시 띄우지 않음)
           if (parsed.options.length > 0) {
             setPendingOptions(parsed.options);
@@ -234,19 +248,46 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
             setPendingOptions([]);
           }
           
-          // GUI 이벤트 처리
+          // GUI 이벤트 처리 (RECRUIT 타입 포함)
           if (parsed.guiEvent) {
             console.log('[GUI_EVENT] 수신:', parsed.guiEvent);
-            // players 데이터가 있는지 확인
-            const hasPlayers = parsed.guiEvent.data?.players && Array.isArray(parsed.guiEvent.data.players) && parsed.guiEvent.data.players.length > 0;
-            if (hasPlayers) {
-              setGuiEvent(parsed.guiEvent);
-              setGamePhase('EVENT_MODAL');
-              playSound('swoosh');
+            
+            // RECRUIT 타입 처리
+            if (parsed.guiEvent.type === 'RECRUIT') {
+              // candidates를 players로 변환
+              const candidates = parsed.guiEvent.candidates || parsed.guiEvent.data?.candidates || [];
+              if (candidates.length > 0) {
+                const players = candidates.map((candidate: any, idx: number) => ({
+                  id: candidate.id || `recruit-${idx}`,
+                  name: candidate.name || candidate.이름 || '',
+                  position: candidate.position || candidate.포지션 || '',
+                  stats: {
+                    age: candidate.age || candidate.나이,
+                    salary: candidate.cost || candidate.희망연봉 || candidate.연봉,
+                    ...candidate
+                  },
+                  ...candidate
+                }));
+                setGuiEvent({
+                  ...parsed.guiEvent,
+                  type: 'RECRUIT',
+                  data: { players }
+                });
+                setGamePhase('EVENT_MODAL');
+                playSound('swoosh');
+              }
             } else {
-              console.warn('[GUI_EVENT] players 데이터가 없거나 비어있음:', parsed.guiEvent);
-              // 데이터가 없으면 모달을 열지 않고 채팅으로만 표시
-              playSound('success');
+              // 기존 타입 처리 (DRAFT, FA, TRADE, NEGOTIATION)
+              const hasPlayers = parsed.guiEvent.data?.players && Array.isArray(parsed.guiEvent.data.players) && parsed.guiEvent.data.players.length > 0;
+              if (hasPlayers) {
+                setGuiEvent(parsed.guiEvent);
+                setGamePhase('EVENT_MODAL');
+                playSound('swoosh');
+              } else {
+                console.warn('[GUI_EVENT] players 데이터가 없거나 비어있음:', parsed.guiEvent);
+                // 데이터가 없으면 모달을 열지 않고 채팅으로만 표시
+                playSound('success');
+              }
             }
           } else {
             playSound('success');
@@ -294,8 +335,8 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
           throw streamError;
         }
       } finally {
-        setStreamingMessage('');
         setLoadingStatusText(undefined);
+        setIsLoading(false);
       }
     } catch (error: any) {
       console.error('Error:', error);
@@ -307,21 +348,21 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
           isUser: false,
         },
       ]);
-      setStreamingMessage('');
       setCurrentOptions([]);
       setPendingOptions([]);
       setLoadingStatusText(undefined);
     } finally {
+      // 로딩 종료
       setIsLoading(false);
     }
-  };
+  }, [playSound]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     handleSend(input);
-  };
+  }, [handleSend, input]);
 
-  const handleOptionClick = (value: string) => {
+  const handleOptionClick = useCallback((value: string) => {
     playSound('click');
     
     // "다음 날로 진행" 같은 날짜 진행 명령인지 확인 (더 정확한 패턴 매칭)
@@ -349,7 +390,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
     }
     
     handleSend(value);
-  };
+  }, [handleSend, playSound]);
 
   // 랜덤 이벤트 효과 적용
   const applyEventEffect = (effect: RandomEvent['effect']) => {
@@ -459,25 +500,29 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
   // const handleLoad = () => { ... }
 
   // GUI 이벤트 핸들러
-  const handlePlayerSelect = (player: Player) => {
+  const handlePlayerSelect = useCallback((player: Player) => {
     playSound('coin');
     const message = `${player.name} 선수 선택`;
     setGamePhase('NEGOTIATION');
     setNegotiationPlayer(player.name);
     handleSend(message);
-  };
+  }, [handleSend, playSound]);
 
-  const handleNegotiationSubmit = (amount: number) => {
-    const message = `${negotiationPlayer} 선수에게 ${amount.toLocaleString()}원 제시`;
+  const handleNegotiationSubmit = useCallback((amount: number) => {
+    setNegotiationPlayer((prevPlayer) => {
+      if (prevPlayer) {
+        const message = `${prevPlayer} 선수에게 ${amount.toLocaleString()}원 제시`;
+        handleSend(message);
+      }
+      return null;
+    });
     setGamePhase('MAIN_GAME');
-    setNegotiationPlayer(null);
-    handleSend(message);
-  };
+  }, [handleSend]);
 
-  const handleEventModalClose = () => {
+  const handleEventModalClose = useCallback(() => {
     setGamePhase('MAIN_GAME');
     setGuiEvent(null);
-  };
+  }, []);
 
   // 옵션 모달 닫기 핸들러
   const handleOptionsModalClose = () => {
@@ -488,13 +533,15 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
   return (
     <div className="flex flex-col h-screen bg-[#Fdfbf7]">
       {/* 헤더 - 상태바 */}
-      <GameHeader 
+      <GameHeader
         teamName={selectedTeam.fullName}
         budget={gameState.budget}
         date={gameState.date}
         season="2026 시즌"
         onApiKeyClick={onResetApiKey}
         onFacilityClick={() => setIsFacilityOpen(true)}
+        onNewsClick={() => setIsNewsOpen(true)}
+        newsCount={newsItems.length}
       />
 
       {/* 메인 - 채팅 영역 */}
@@ -507,7 +554,6 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
               isUser={msg.isUser}
             />
           ))}
-          {/* 스트리밍 중에는 텍스트를 표시하지 않음 (로딩 오버레이만 표시) */}
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -517,15 +563,15 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
         {/* 선택지 버튼 패널 제거됨 - 모달로 대체 */}
 
         {/* 입력 폼 */}
-        <form onSubmit={handleSubmit} className="p-4">
-          <div className="flex gap-3 max-w-5xl mx-auto">
+        <form onSubmit={handleSubmit} className="p-2 sm:p-3 md:p-4">
+          <div className="flex gap-2 sm:gap-3 max-w-5xl mx-auto">
             <motion.input
               whileFocus={{ scale: 1.01 }}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="명령을 입력하세요..."
-              className="flex-1 px-5 py-3 border-2 border-baseball-green/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green/50 focus:border-baseball-green disabled:bg-gray-100 font-sans shadow-sm focus:shadow-md transition-all"
+              className="flex-1 px-3 sm:px-4 md:px-5 py-2.5 sm:py-3 text-sm sm:text-base border-2 border-baseball-green/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green/50 focus:border-baseball-green disabled:bg-gray-100 font-sans shadow-sm focus:shadow-md transition-all touch-manipulation"
               disabled={isLoading}
             />
             <motion.button
@@ -533,9 +579,9 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
               disabled={isLoading || !input.trim()}
               whileHover={{ scale: 1.05, y: -2 }}
               whileTap={{ scale: 0.95 }}
-              className="px-7 py-3 bg-gradient-to-r from-baseball-green to-[#0a3528] hover:from-baseball-green-dark hover:to-[#08251f] disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white font-bold rounded-lg transition-all shadow-lg hover:shadow-xl active:shadow-md border-b-2 border-baseball-green-dark/50"
+              className="px-4 sm:px-6 md:px-7 py-2.5 sm:py-3 bg-gradient-to-r from-baseball-green to-[#0a3528] hover:from-baseball-green-dark hover:to-[#08251f] disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white font-bold rounded-lg transition-all shadow-lg hover:shadow-xl active:shadow-md border-b-2 border-baseball-green-dark/50 touch-manipulation flex-shrink-0"
             >
-              <Send className="w-5 h-5" />
+              <Send className="w-4 h-4 sm:w-5 sm:h-5" />
             </motion.button>
           </div>
         </form>
@@ -560,73 +606,95 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
       />
 
       {/* 작전 지시 플로팅 버튼 (트리거 방식) */}
-      {!isOptionsModalOpen && !isLoading && pendingOptions.length > 0 && (
-        <motion.button
-          initial={{ opacity: 0, scale: 0, y: 20 }}
-          animate={{ 
-            opacity: 1, 
-            scale: 1, 
-            y: 0,
-          }}
-          exit={{ opacity: 0, scale: 0, y: 20 }}
-          whileHover={{ scale: 1.1, y: -2 }}
-          whileTap={{ scale: 0.9 }}
-          onClick={() => setIsOptionsModalOpen(true)}
-          className="fixed bottom-24 right-4 sm:right-6 z-40 bg-gradient-to-r from-baseball-green to-[#0a3528] text-white px-4 sm:px-5 py-3 sm:py-4 rounded-full shadow-2xl hover:shadow-3xl transition-all border-2 border-baseball-gold/30 flex items-center justify-center gap-2 group"
-          title="작전 지시 확인"
-        >
-          {/* 펄스 애니메이션 링 */}
-          <motion.div
-            className="absolute inset-0 rounded-full bg-baseball-green/30"
-            animate={{
-              scale: [1, 1.3, 1],
-              opacity: [0.5, 0, 0.5],
+      <AnimatePresence>
+        {!isOptionsModalOpen && !isLoading && pendingOptions.length > 0 && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0, y: 20 }}
+            animate={{ 
+              opacity: 1, 
+              scale: 1, 
+              y: 0,
             }}
-            transition={{
-              duration: 2,
-              repeat: Infinity,
-              ease: "easeInOut",
+            exit={{ opacity: 0, scale: 0, y: 20 }}
+            whileHover={{ scale: 1.05, y: -2 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              setIsOptionsModalOpen(true);
+              playSound('click');
             }}
-          />
-          
-          {/* 버튼 내용 */}
-          <motion.span
-            animate={{
-              scale: [1, 1.05, 1],
-            }}
-            transition={{
-              duration: 2,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
-            className="text-lg sm:text-xl relative z-10"
+            className="fixed bottom-20 sm:bottom-24 right-3 sm:right-4 md:right-6 z-40 bg-gradient-to-r from-baseball-green to-[#0a3528] text-white px-3 sm:px-4 md:px-5 py-2.5 sm:py-3 md:py-4 rounded-full shadow-2xl hover:shadow-3xl transition-all border-2 border-baseball-gold/30 flex items-center justify-center gap-1.5 sm:gap-2 group cursor-pointer touch-manipulation"
+            title="작전 지시 확인"
           >
-            📋
-          </motion.span>
-          <span className="text-xs sm:text-sm font-bold hidden sm:inline whitespace-nowrap relative z-10">
-            작전 지시
-          </span>
-          
-          {/* 알림 뱃지 (선택지 개수) */}
-          {pendingOptions.length > 0 && (
+            {/* 펄스 애니메이션 링 (외부 링) */}
+            <motion.div
+              className="absolute inset-0 rounded-full bg-baseball-green/20"
+              animate={{
+                scale: [1, 1.4, 1],
+                opacity: [0.6, 0, 0.6],
+              }}
+              transition={{
+                duration: 2.5,
+                repeat: Infinity,
+                ease: "easeInOut",
+              }}
+            />
+            
+            {/* 펄스 애니메이션 링 (내부 링) */}
+            <motion.div
+              className="absolute inset-0 rounded-full bg-baseball-gold/20"
+              animate={{
+                scale: [1, 1.2, 1],
+                opacity: [0.4, 0, 0.4],
+              }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                ease: "easeInOut",
+                delay: 0.3,
+              }}
+            />
+            
+            {/* 버튼 내용 */}
             <motion.span
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className="absolute -top-1 -right-1 bg-baseball-gold text-baseball-green text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white shadow-lg relative z-10"
+              animate={{
+                scale: [1, 1.08, 1],
+              }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                ease: "easeInOut",
+              }}
+              className="text-base sm:text-lg md:text-xl relative z-10"
             >
-              {pendingOptions.length}
+              📋
             </motion.span>
-          )}
-        </motion.button>
-      )}
+            <span className="text-[10px] sm:text-xs md:text-sm font-bold hidden md:inline whitespace-nowrap relative z-10">
+              작전 지시
+            </span>
+            
+            {/* 알림 뱃지 (선택지 개수) */}
+            {pendingOptions.length > 0 && (
+              <motion.span
+                initial={{ scale: 0, rotate: -180 }}
+                animate={{ scale: 1, rotate: 0 }}
+                exit={{ scale: 0, rotate: 180 }}
+                className="absolute -top-0.5 sm:-top-1 -right-0.5 sm:-right-1 bg-baseball-gold text-baseball-green text-[9px] sm:text-[10px] font-bold rounded-full w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center border-2 border-white shadow-lg relative z-10"
+              >
+                {pendingOptions.length > 9 ? '9+' : pendingOptions.length}
+              </motion.span>
+            )}
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* 이벤트 모달 */}
       <AnimatePresence>
         {gamePhase === 'EVENT_MODAL' && guiEvent && (
           <EventModal
             isOpen={true}
-            type={guiEvent.type as 'DRAFT' | 'FA' | 'TRADE'}
+            type={guiEvent.type === 'RECRUIT' ? 'FA' : (guiEvent.type as 'DRAFT' | 'FA' | 'TRADE')}
             title={
+              guiEvent.type === 'RECRUIT' ? (guiEvent.title || '선수 영입') :
               guiEvent.type === 'DRAFT' ? '신인 드래프트' :
               guiEvent.type === 'FA' ? 'FA 시장' :
               '트레이드 제안'
@@ -652,7 +720,12 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey }: C
         )}
       </AnimatePresence>
 
-      {/* 뉴스 사이드바 제거됨 */}
+      {/* 뉴스 사이드바 */}
+      <NewsSidebar
+        isOpen={isNewsOpen}
+        onClose={() => setIsNewsOpen(false)}
+        newsItems={newsItems}
+      />
 
       {/* 랜덤 이벤트 모달 */}
       <RandomEventModal
