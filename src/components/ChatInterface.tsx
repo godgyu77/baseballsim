@@ -118,6 +118,24 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
                   chatInstanceRef.current = modelRef.current.startChat({
                     history: history,
                   });
+                  
+                  // **지시사항 버튼 복원**: 저장된 옵션이 있으면 복원, 없으면 마지막 AI 메시지에서 파싱
+                  if (parsed.pendingOptions && Array.isArray(parsed.pendingOptions) && parsed.pendingOptions.length > 0) {
+                    // 저장된 옵션 복원
+                    setPendingOptions(parsed.pendingOptions);
+                    setCurrentOptions(parsed.pendingOptions);
+                  } else {
+                    // 저장된 옵션이 없으면 마지막 AI 메시지에서 옵션 파싱
+                    const aiMessages = parsed.messages.filter((m: Message) => !m.isUser);
+                    if (aiMessages.length > 0) {
+                      const lastAIMessage = aiMessages[aiMessages.length - 1];
+                      const parsedResponse = parseAIResponse(lastAIMessage.text);
+                      if (parsedResponse.options.length > 0) {
+                        setPendingOptions(parsedResponse.options);
+                        setCurrentOptions(parsedResponse.options);
+                      }
+                    }
+                  }
                 }
                 
                 if (onGameLoaded) {
@@ -558,6 +576,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
         newsItems,
         readNewsCount, // 읽은 뉴스 개수도 저장
         selectedTeam: selectedTeam, // 팀 전체 정보 저장
+        pendingOptions: pendingOptions, // 지시사항 버튼을 위한 옵션 저장
         timestamp: new Date().toISOString(),
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
@@ -567,7 +586,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
       console.error('저장 오류:', e);
       alert('저장에 실패했습니다.');
     }
-  }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, playSound]);
+  }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, pendingOptions, playSound]);
 
   // 불러오기 기능
   const handleLoad = useCallback(async () => {
@@ -619,6 +638,24 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
         chatInstanceRef.current = modelRef.current.startChat({
           history: history,
         });
+        
+        // **지시사항 버튼 복원**: 저장된 옵션이 있으면 복원, 없으면 마지막 AI 메시지에서 파싱
+        if (parsed.pendingOptions && Array.isArray(parsed.pendingOptions) && parsed.pendingOptions.length > 0) {
+          // 저장된 옵션 복원
+          setPendingOptions(parsed.pendingOptions);
+          setCurrentOptions(parsed.pendingOptions);
+        } else {
+          // 저장된 옵션이 없으면 마지막 AI 메시지에서 옵션 파싱
+          const aiMessages = parsed.messages.filter((m: Message) => !m.isUser);
+          if (aiMessages.length > 0) {
+            const lastAIMessage = aiMessages[aiMessages.length - 1];
+            const parsedResponse = parseAIResponse(lastAIMessage.text);
+            if (parsedResponse.options.length > 0) {
+              setPendingOptions(parsedResponse.options);
+              setCurrentOptions(parsedResponse.options);
+            }
+          }
+        }
       }
 
       playSound('success');
