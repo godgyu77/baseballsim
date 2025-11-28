@@ -62,11 +62,19 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [isNewsOpen, setIsNewsOpen] = useState(false);
   const [readNewsCount, setReadNewsCount] = useState(0); // 읽은 뉴스 개수 추적
+  const [hasCheckedLoadGame, setHasCheckedLoadGame] = useState(false); // 불러오기 시 옵션 체크 플래그
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInstanceRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
   const messagesRef = useRef<Message[]>([]);
   const { playSound } = useSound();
+  
+  // shouldLoadGame이 변경되면 체크 플래그 리셋
+  useEffect(() => {
+    if (!shouldLoadGame) {
+      setHasCheckedLoadGame(false);
+    }
+  }, [shouldLoadGame]);
 
   useEffect(() => {
     if (apiKey) {
@@ -128,10 +136,12 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
   }, [apiKey, shouldLoadGame, onGameLoaded]);
 
   // 게임 시작 시 팀 정보 전송 (모델 초기화 후, 저장된 데이터가 없을 때만)
+  // 불러오기 시에도 마지막 메시지에 옵션이 없으면 초기 메시지 전송 (지시사항 버튼 표시를 위해)
   useEffect(() => {
     const savedData = localStorage.getItem(SAVE_KEY);
     const hasSavedData = savedData && JSON.parse(savedData).messages?.length > 0;
     
+    // 새 게임 시작 시: 저장된 데이터가 없으면 초기 메시지 전송
     if (selectedTeam && messages.length === 0 && isModelReady && modelRef.current && !hasSavedData) {
       const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 게임을 시작해주세요.`;
       // 약간의 지연을 두어 모든 초기화가 완료되도록 함
@@ -140,7 +150,40 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [selectedTeam, isModelReady, messages.length]);
+    
+    // 불러오기 시: 저장된 메시지가 복원된 후, 마지막 AI 응답에 옵션이 없으면 초기 메시지 전송
+    // 한 번만 체크하도록 hasCheckedLoadGame 플래그 사용
+    if (selectedTeam && shouldLoadGame && messages.length > 0 && isModelReady && modelRef.current && !hasCheckedLoadGame) {
+      // 마지막 AI 메시지 확인
+      const aiMessages = messages.filter(m => !m.isUser);
+      if (aiMessages.length > 0) {
+        const lastAIMessage = aiMessages[aiMessages.length - 1];
+        const parsed = parseAIResponse(lastAIMessage.text);
+        
+        // 마지막 메시지에 옵션이 없으면 초기 메시지 전송 (지시사항 버튼 표시를 위해)
+        if (parsed.options.length === 0 && pendingOptions.length === 0) {
+          setHasCheckedLoadGame(true);
+          const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 게임을 시작해주세요.`;
+          // 약간의 지연을 두어 모든 초기화가 완료되도록 함
+          const timer = setTimeout(() => {
+            handleSend(teamMessage);
+          }, 500);
+          return () => clearTimeout(timer);
+        } else {
+          // 옵션이 있으면 체크 완료로 표시
+          setHasCheckedLoadGame(true);
+        }
+      } else {
+        // AI 메시지가 없으면 초기 메시지 전송
+        setHasCheckedLoadGame(true);
+        const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 게임을 시작해주세요.`;
+        const timer = setTimeout(() => {
+          handleSend(teamMessage);
+        }, 500);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [selectedTeam, isModelReady, messages.length, shouldLoadGame, pendingOptions.length, hasCheckedLoadGame]);
 
   useEffect(() => {
     messagesRef.current = messages;
