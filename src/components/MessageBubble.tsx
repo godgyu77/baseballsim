@@ -67,15 +67,15 @@ function MessageBubble({
         </div>
 
         {/* 게임스러운 본문 */}
-        <div className="px-3 sm:px-4 py-3 sm:py-4 text-xs sm:text-sm text-gray-800 bg-white/50">
+        <div className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 text-xs sm:text-sm text-gray-800 bg-white/50">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
               // 표 스타일링 (컴팩트, 고정 헤더, 반응형)
               table: ({ children }: any) => (
-                <div className="w-full overflow-x-auto my-3 -mx-4 px-2 sm:px-4 touch-pan-x">
+                <div className="w-full overflow-x-auto my-3 -mx-2 sm:-mx-4 px-2 sm:px-4 touch-pan-x" style={{ WebkitOverflowScrolling: 'touch' }}>
                   <div className="inline-block min-w-full align-middle">
-                    <table className="w-full border-collapse bg-white text-[10px] sm:text-xs">
+                    <table className="w-full border-collapse bg-white text-[9px] sm:text-[10px] md:text-xs whitespace-nowrap">
                       {children}
                     </table>
                   </div>
@@ -109,7 +109,7 @@ function MessageBubble({
                 );
               },
               th: ({ children }: any) => (
-                <th className="border border-gray-300 px-1.5 sm:px-2 py-1 sm:py-1.5 text-left font-semibold text-[10px] sm:text-xs text-white bg-baseball-green whitespace-nowrap cursor-default">
+                <th className="border border-gray-300 px-1 sm:px-1.5 md:px-2 py-0.5 sm:py-1 md:py-1.5 text-left font-semibold text-[9px] sm:text-[10px] md:text-xs text-white bg-baseball-green whitespace-nowrap cursor-default">
                   {children}
                 </th>
               ),
@@ -121,7 +121,7 @@ function MessageBubble({
                 
                 return (
                   <td 
-                    className={`border border-gray-300 px-1.5 sm:px-2 py-1 sm:py-1.5 text-[10px] sm:text-xs font-mono cursor-default whitespace-nowrap ${
+                    className={`border border-gray-300 px-1 sm:px-1.5 md:px-2 py-0.5 sm:py-1 md:py-1.5 text-[9px] sm:text-[10px] md:text-xs font-mono cursor-default whitespace-nowrap ${
                       isDivisionColumn 
                         ? cellText.trim() === '1군' 
                           ? 'font-bold text-baseball-green bg-green-50' 

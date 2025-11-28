@@ -16,6 +16,7 @@ import { Team } from '../constants/TeamData';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
 import { createInitialFacilityState, FACILITY_DEFINITIONS } from '../constants/Facilities';
+import { Difficulty, GAME_CONFIG, applyIncomeMultiplier } from '../constants/GameConfig';
 
 interface Message {
   text: string;
@@ -25,6 +26,7 @@ interface Message {
 interface ChatInterfaceProps {
   apiKey: string;
   selectedTeam: Team;
+  difficulty: Difficulty;
   onResetApiKey?: () => void;
   shouldLoadGame?: boolean;
   onGameLoaded?: () => void;
@@ -32,7 +34,7 @@ interface ChatInterfaceProps {
 
 const SAVE_KEY = 'baseball_game_save';
 
-export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, shouldLoadGame = false, onGameLoaded }: ChatInterfaceProps) {
+export default function ChatInterface({ apiKey, selectedTeam, difficulty, onResetApiKey, shouldLoadGame = false, onGameLoaded }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -42,11 +44,13 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
     budget: number | null;
     morale: number; // 팀 사기 (0 ~ 100)
     fanLoyalty: number; // 팬 충성도 (0 ~ 100)
+    difficulty: Difficulty; // 난이도
   }>({
     date: null,
     budget: null, // 초기값은 null (0이 아닌 null로 명확히 구분)
     morale: 50, // 초기값 50
     fanLoyalty: 50, // 초기값 50
+    difficulty: difficulty, // 난이도 저장
   });
   const [gamePhase, setGamePhase] = useState<GamePhase>('MAIN_GAME');
   const [guiEvent, setGuiEvent] = useState<GUIEvent | null>(null);
@@ -63,186 +67,16 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
   const [isNewsOpen, setIsNewsOpen] = useState(false);
   const [readNewsCount, setReadNewsCount] = useState(0); // 읽은 뉴스 개수 추적
   const [hasCheckedLoadGame, setHasCheckedLoadGame] = useState(false); // 불러오기 시 옵션 체크 플래그
+  const isLoadProcessingRef = useRef(false); // 불러오기 중복 방지 플래그
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInstanceRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
   const messagesRef = useRef<Message[]>([]);
+  const isLoadingRef = useRef(false);
+  const handleSendRef = useRef<((messageText: string) => Promise<void>) | null>(null);
   const { playSound } = useSound();
   
-  // shouldLoadGame이 변경되면 체크 플래그 리셋
-  useEffect(() => {
-    if (!shouldLoadGame) {
-      setHasCheckedLoadGame(false);
-    }
-  }, [shouldLoadGame]);
-
-  useEffect(() => {
-    if (apiKey) {
-      (async () => {
-        modelRef.current = await getGeminiModel(apiKey);
-        chatInstanceRef.current = null;
-        setIsModelReady(true);
-        
-        // 불러오기 요청이 있으면 게임 상태 복원
-        if (shouldLoadGame) {
-          const savedData = localStorage.getItem(SAVE_KEY);
-          if (savedData) {
-            try {
-              const parsed = JSON.parse(savedData);
-              if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
-                // 메시지 복원
-                setMessages(parsed.messages);
-                messagesRef.current = parsed.messages;
-                
-                // 게임 상태 복원
-                if (parsed.gameState) {
-                  setGameState(parsed.gameState);
-                }
-                if (parsed.facilities) {
-                  setFacilities(parsed.facilities);
-                }
-                if (parsed.newsItems) {
-                  setNewsItems(parsed.newsItems);
-                }
-                if (parsed.readNewsCount !== undefined) {
-                  setReadNewsCount(parsed.readNewsCount);
-                }
-                
-                // 모델에 메시지 히스토리 복원 (API 연결 유지)
-                if (modelRef.current && parsed.messages.length > 0) {
-                  const history = parsed.messages.map((msg: Message) => ({
-                    role: msg.isUser ? 'user' : 'model',
-                    parts: [{ text: msg.text }],
-                  }));
-                  
-                  chatInstanceRef.current = modelRef.current.startChat({
-                    history: history,
-                  });
-                  
-                  // **지시사항 버튼 복원**: 저장된 옵션이 있으면 복원, 없으면 마지막 AI 메시지에서 파싱
-                  if (parsed.pendingOptions && Array.isArray(parsed.pendingOptions) && parsed.pendingOptions.length > 0) {
-                    // 저장된 옵션 복원
-                    setPendingOptions(parsed.pendingOptions);
-                    setCurrentOptions(parsed.pendingOptions);
-                  } else {
-                    // 저장된 옵션이 없으면 마지막 AI 메시지에서 옵션 파싱
-                    const aiMessages = parsed.messages.filter((m: Message) => !m.isUser);
-                    if (aiMessages.length > 0) {
-                      const lastAIMessage = aiMessages[aiMessages.length - 1];
-                      const parsedResponse = parseAIResponse(lastAIMessage.text);
-                      if (parsedResponse.options.length > 0) {
-                        setPendingOptions(parsedResponse.options);
-                        setCurrentOptions(parsedResponse.options);
-                      }
-                    }
-                  }
-                }
-                
-                if (onGameLoaded) {
-                  onGameLoaded();
-                }
-              }
-            } catch (e) {
-              console.error('불러오기 오류:', e);
-            }
-          }
-        }
-      })();
-    } else {
-      setIsModelReady(false);
-    }
-  }, [apiKey, shouldLoadGame, onGameLoaded]);
-
-  // 게임 시작 시 팀 정보 전송 (모델 초기화 후, 저장된 데이터가 없을 때만)
-  // 불러오기 시에도 마지막 메시지에 옵션이 없으면 초기 메시지 전송 (지시사항 버튼 표시를 위해)
-  useEffect(() => {
-    const savedData = localStorage.getItem(SAVE_KEY);
-    const hasSavedData = savedData && JSON.parse(savedData).messages?.length > 0;
-    
-    // 새 게임 시작 시: 저장된 데이터가 없으면 초기 메시지 전송
-    if (selectedTeam && messages.length === 0 && isModelReady && modelRef.current && !hasSavedData) {
-      const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 게임을 시작해주세요.`;
-      // 약간의 지연을 두어 모든 초기화가 완료되도록 함
-      const timer = setTimeout(() => {
-        handleSend(teamMessage);
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-    
-    // 불러오기 시: 저장된 메시지가 복원된 후, 마지막 AI 응답에 옵션이 없으면 초기 메시지 전송
-    // 한 번만 체크하도록 hasCheckedLoadGame 플래그 사용
-    if (selectedTeam && shouldLoadGame && messages.length > 0 && isModelReady && modelRef.current && !hasCheckedLoadGame) {
-      // 마지막 AI 메시지 확인
-      const aiMessages = messages.filter(m => !m.isUser);
-      if (aiMessages.length > 0) {
-        const lastAIMessage = aiMessages[aiMessages.length - 1];
-        const parsed = parseAIResponse(lastAIMessage.text);
-        
-        // 마지막 메시지에 옵션이 없으면 초기 메시지 전송 (지시사항 버튼 표시를 위해)
-        if (parsed.options.length === 0 && pendingOptions.length === 0) {
-          setHasCheckedLoadGame(true);
-          const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 게임을 시작해주세요.`;
-          // 약간의 지연을 두어 모든 초기화가 완료되도록 함
-          const timer = setTimeout(() => {
-            handleSend(teamMessage);
-          }, 500);
-          return () => clearTimeout(timer);
-        } else {
-          // 옵션이 있으면 체크 완료로 표시
-          setHasCheckedLoadGame(true);
-        }
-      } else {
-        // AI 메시지가 없으면 초기 메시지 전송
-        setHasCheckedLoadGame(true);
-        const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 게임을 시작해주세요.`;
-        const timer = setTimeout(() => {
-          handleSend(teamMessage);
-        }, 500);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [selectedTeam, isModelReady, messages.length, shouldLoadGame, pendingOptions.length, hasCheckedLoadGame]);
-
-  useEffect(() => {
-    messagesRef.current = messages;
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // 메시지 변경 시 헤더 정보 업데이트
-  useEffect(() => {
-    // 마지막 AI 메시지에서 날짜와 자금 정보 추출
-    const aiMessages = messages.filter(m => !m.isUser);
-    if (aiMessages.length > 0) {
-      const lastAIMessage = aiMessages[aiMessages.length - 1];
-      const parsed = parseAIResponse(lastAIMessage.text);
-      
-      // 날짜 추출
-      const extractedDate = extractDate(parsed.text);
-      if (extractedDate) {
-        setGameState(prev => ({ ...prev, date: extractedDate }));
-      }
-      
-      // 자금 추출
-      const extractedBudget = extractBudget(parsed.text);
-      console.log('[자금 파싱] 원본 텍스트:', lastAIMessage.text.substring(0, 200)); // 처음 200자만
-      console.log('[자금 파싱] 파싱된 텍스트:', parsed.text.substring(0, 200));
-      console.log('[자금 파싱] 추출된 자금:', extractedBudget);
-      if (extractedBudget !== null && extractedBudget > 0) { // 0보다 큰 값만 업데이트
-        console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget.toLocaleString('ko-KR') + '원');
-        setGameState(prev => ({ ...prev, budget: extractedBudget }));
-      } else {
-        console.log('[자금 파싱] ❌ 자금 추출 실패 또는 0원');
-      }
-    }
-  }, [messages]);
-
-
-  const isLoadingRef = useRef(false);
-  
-  useEffect(() => {
-    isLoadingRef.current = isLoading;
-  }, [isLoading]);
-
+  // handleSend 함수를 최상단으로 이동 (TDZ 문제 해결)
   const handleSend = useCallback(async (messageText: string) => {
     if (!messageText.trim() || isLoadingRef.current) return;
 
@@ -352,13 +186,40 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
           
           // 옵션이 있으면 플로팅 버튼만 표시 (모달은 즉시 띄우지 않음)
           if (parsed.options.length > 0) {
-            setPendingOptions(parsed.options);
-            setCurrentOptions(parsed.options);
+            // 난이도 선택 및 지시사항 관련 옵션 필터링
+            const filteredOptions = parsed.options.filter(opt => {
+              const label = opt.label.toLowerCase();
+              const value = opt.value.toLowerCase();
+              return !(
+                // 난이도 선택 관련 필터링
+                label.includes('이지 모드') || label.includes('하드 모드') ||
+                label.includes('easy mode') || label.includes('hard mode') ||
+                label.includes('난이도') || label.includes('difficulty') ||
+                value.includes('이지 모드') || value.includes('하드 모드') ||
+                value.includes('easy') || value.includes('hard') ||
+                value.includes('난이도') ||
+                // 지시사항/가이드 관련 필터링
+                label.includes('지시사항') || label.includes('가이드') ||
+                label.includes('guide') || label.includes('instruction') ||
+                value.includes('지시사항') || value.includes('가이드') ||
+                value.includes('guide') || value.includes('instruction')
+              );
+            });
+            
+            if (filteredOptions.length > 0) {
+              setPendingOptions(filteredOptions);
+              setCurrentOptions(filteredOptions);
+            } else {
+              // 필터링 후 옵션이 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
+              setPendingOptions([]);
+              setCurrentOptions([]);
+            }
             // 모달은 즉시 띄우지 않고, 플로팅 버튼만 표시
             setIsOptionsModalOpen(false);
           } else {
-            setCurrentOptions([]);
+            // 옵션이 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
             setPendingOptions([]);
+            setCurrentOptions([]);
           }
           
           // GUI 이벤트 처리 (RECRUIT 타입 포함)
@@ -385,12 +246,39 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
             
             // 옵션이 있으면 플로팅 버튼만 표시 (모달은 즉시 띄우지 않음)
             if (parsed.options.length > 0) {
-              setPendingOptions(parsed.options);
-              setCurrentOptions(parsed.options);
+              // 난이도 선택 및 지시사항 관련 옵션 필터링
+              const filteredOptions = parsed.options.filter(opt => {
+                const label = opt.label.toLowerCase();
+                const value = opt.value.toLowerCase();
+                return !(
+                  // 난이도 선택 관련 필터링
+                  label.includes('이지 모드') || label.includes('하드 모드') ||
+                  label.includes('easy mode') || label.includes('hard mode') ||
+                  label.includes('난이도') || label.includes('difficulty') ||
+                  value.includes('이지 모드') || value.includes('하드 모드') ||
+                  value.includes('easy') || value.includes('hard') ||
+                  value.includes('난이도') ||
+                  // 지시사항/가이드 관련 필터링
+                  label.includes('지시사항') || label.includes('가이드') ||
+                  label.includes('guide') || label.includes('instruction') ||
+                  value.includes('지시사항') || value.includes('가이드') ||
+                  value.includes('guide') || value.includes('instruction')
+                );
+              });
+              
+              if (filteredOptions.length > 0) {
+                setPendingOptions(filteredOptions);
+                setCurrentOptions(filteredOptions);
+              } else {
+                // 필터링 후 옵션이 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
+                setPendingOptions([]);
+                setCurrentOptions([]);
+              }
               setIsOptionsModalOpen(false);
             } else {
-              setCurrentOptions([]);
+              // 옵션이 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
               setPendingOptions([]);
+              setCurrentOptions([]);
             }
             
             // GUI 이벤트 처리
@@ -427,6 +315,275 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
       setIsLoading(false);
     }
   }, [playSound]);
+
+  // handleSend ref 업데이트 (의존성 배열에서 제거하기 위해)
+  useEffect(() => {
+    handleSendRef.current = handleSend;
+  }, [handleSend]);
+  
+  // shouldLoadGame이 변경되면 체크 플래그 리셋
+  useEffect(() => {
+    if (!shouldLoadGame) {
+      setHasCheckedLoadGame(false);
+    }
+  }, [shouldLoadGame]);
+
+  useEffect(() => {
+    if (apiKey) {
+      (async () => {
+        modelRef.current = await getGeminiModel(apiKey);
+        chatInstanceRef.current = null;
+        setIsModelReady(true);
+        
+        // 불러오기 요청이 있으면 게임 상태 복원
+        if (shouldLoadGame) {
+          const savedData = localStorage.getItem(SAVE_KEY);
+          if (savedData) {
+            try {
+              const parsed = JSON.parse(savedData);
+              if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+                // 메시지 복원
+                setMessages(parsed.messages);
+                messagesRef.current = parsed.messages;
+                
+                // 게임 상태 복원
+                if (parsed.gameState) {
+                  // 난이도 복원 (기존 저장 데이터 호환성)
+                  const restoredGameState = {
+                    ...parsed.gameState,
+                    difficulty: parsed.gameState.difficulty || difficulty, // 저장된 난이도가 없으면 현재 난이도 사용
+                  };
+                  setGameState(restoredGameState);
+                }
+                if (parsed.facilities) {
+                  setFacilities(parsed.facilities);
+                }
+                if (parsed.newsItems) {
+                  setNewsItems(parsed.newsItems);
+                }
+                if (parsed.readNewsCount !== undefined) {
+                  setReadNewsCount(parsed.readNewsCount);
+                }
+                
+                // 모델에 메시지 히스토리 복원 (API 연결 유지)
+                if (modelRef.current && parsed.messages.length > 0) {
+                  const history = parsed.messages.map((msg: Message) => ({
+                    role: msg.isUser ? 'user' : 'model',
+                    parts: [{ text: msg.text }],
+                  }));
+                  
+                  chatInstanceRef.current = modelRef.current.startChat({
+                    history: history,
+                  });
+                  
+                  // **지시사항 버튼 복원**: 저장된 옵션이 있으면 필터링하여 복원
+                  if (parsed.pendingOptions && Array.isArray(parsed.pendingOptions) && parsed.pendingOptions.length > 0) {
+                    // 난이도 선택 및 지시사항 관련 옵션 필터링
+                    const filteredOptions = parsed.pendingOptions.filter(opt => {
+                      const label = opt.label.toLowerCase();
+                      const value = opt.value.toLowerCase();
+                      return !(
+                        // 난이도 선택 관련 필터링
+                        label.includes('이지 모드') || label.includes('하드 모드') ||
+                        label.includes('easy mode') || label.includes('hard mode') ||
+                        label.includes('난이도') || label.includes('difficulty') ||
+                        value.includes('이지 모드') || value.includes('하드 모드') ||
+                        value.includes('easy') || value.includes('hard') ||
+                        value.includes('난이도') ||
+                        // 지시사항/가이드 관련 필터링
+                        label.includes('지시사항') || label.includes('가이드') ||
+                        label.includes('guide') || label.includes('instruction') ||
+                        value.includes('지시사항') || value.includes('가이드') ||
+                        value.includes('guide') || value.includes('instruction')
+                      );
+                    });
+                    
+                    if (filteredOptions.length > 0) {
+                      setPendingOptions(filteredOptions);
+                      setCurrentOptions(filteredOptions);
+                    } else {
+                      // 필터링 후 옵션이 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
+                      setPendingOptions([]);
+                      setCurrentOptions([]);
+                    }
+                  } else {
+                    // 저장된 옵션이 없으면 마지막 AI 메시지에서 옵션 파싱
+                    const aiMessages = parsed.messages.filter((m: Message) => !m.isUser);
+                    if (aiMessages.length > 0) {
+                      const lastAIMessage = aiMessages[aiMessages.length - 1];
+                      const parsedResponse = parseAIResponse(lastAIMessage.text);
+                      if (parsedResponse.options.length > 0) {
+                        // 난이도 선택 및 지시사항 관련 옵션 필터링
+                        const filteredOptions = parsedResponse.options.filter(opt => {
+                          const label = opt.label.toLowerCase();
+                          const value = opt.value.toLowerCase();
+                          return !(
+                            // 난이도 선택 관련 필터링
+                            label.includes('이지 모드') || label.includes('하드 모드') ||
+                            label.includes('easy mode') || label.includes('hard mode') ||
+                            label.includes('난이도') || label.includes('difficulty') ||
+                            value.includes('이지 모드') || value.includes('하드 모드') ||
+                            value.includes('easy') || value.includes('hard') ||
+                            value.includes('난이도') ||
+                            // 지시사항/가이드 관련 필터링
+                            label.includes('지시사항') || label.includes('가이드') ||
+                            label.includes('guide') || label.includes('instruction') ||
+                            value.includes('지시사항') || value.includes('가이드') ||
+                            value.includes('guide') || value.includes('instruction')
+                          );
+                        });
+                        
+                        if (filteredOptions.length > 0) {
+                          setPendingOptions(filteredOptions);
+                          setCurrentOptions(filteredOptions);
+                        } else {
+                          // 필터링 후 옵션이 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
+                          setPendingOptions([]);
+                          setCurrentOptions([]);
+                        }
+                      } else {
+                        // 옵션이 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
+                        setPendingOptions([]);
+                        setCurrentOptions([]);
+                      }
+                    } else {
+                      // AI 메시지가 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
+                      setPendingOptions([]);
+                      setCurrentOptions([]);
+                    }
+                  }
+                }
+                
+                if (onGameLoaded) {
+                  onGameLoaded();
+                }
+              }
+            } catch (e) {
+              console.error('불러오기 오류:', e);
+            }
+          }
+        }
+      })();
+    } else {
+      setIsModelReady(false);
+    }
+  }, [apiKey, shouldLoadGame, onGameLoaded]);
+
+  // 게임 시작 시 팀 정보 전송 (모델 초기화 후, 저장된 데이터가 없을 때만)
+  // 불러오기 시에도 마지막 메시지에 옵션이 없으면 초기 메시지 전송 (지시사항 버튼 표시를 위해)
+  const pendingOptionsRef = useRef<Array<{ label: string; value: string }>>([]);
+  useEffect(() => {
+    pendingOptionsRef.current = pendingOptions;
+  }, [pendingOptions]);
+
+  useEffect(() => {
+    const savedData = localStorage.getItem(SAVE_KEY);
+    const hasSavedData = savedData && JSON.parse(savedData).messages?.length > 0;
+    
+    // 새 게임 시작 시: 저장된 데이터가 없으면 초기 메시지 전송
+    if (selectedTeam && messages.length === 0 && isModelReady && modelRef.current && !hasSavedData) {
+      // 옵션 초기화 (일정 진행 버튼만 표시되도록) - 함수형 업데이트로 중복 방지
+      setPendingOptions(prev => prev.length === 0 ? prev : []);
+      setCurrentOptions(prev => prev.length === 0 ? prev : []);
+      
+      const difficultyText = difficulty === 'EASY' ? '이지 모드' : '하드 모드';
+      const teamMessage = `${selectedTeam.fullName}을 선택했습니다. ${difficultyText}로 게임을 시작해주세요.`;
+      // 약간의 지연을 두어 모든 초기화가 완료되도록 함
+      const timer = setTimeout(() => {
+        if (handleSendRef.current) {
+          handleSendRef.current(teamMessage);
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+    
+    // 불러오기 시: 저장된 메시지가 복원된 후, 마지막 AI 응답에 옵션이 없으면 초기 메시지 전송
+    // 한 번만 체크하도록 hasCheckedLoadGame 플래그 사용
+    // handleLoad에서 이미 pendingOptions를 복원했으므로, 여기서는 옵션이 없을 때만 처리
+    if (selectedTeam && shouldLoadGame && messages.length > 0 && isModelReady && modelRef.current && !hasCheckedLoadGame) {
+      // handleLoad에서 pendingOptions를 복원했으므로, 여기서는 옵션이 없는 경우만 처리
+      // 약간의 지연을 두어 handleLoad의 상태 업데이트가 완료되도록 함
+      const checkTimer = setTimeout(() => {
+        // 마지막 AI 메시지 확인
+        const aiMessages = messages.filter(m => !m.isUser);
+        if (aiMessages.length > 0) {
+          const lastAIMessage = aiMessages[aiMessages.length - 1];
+          const parsed = parseAIResponse(lastAIMessage.text);
+          
+          // 마지막 메시지에 옵션이 없고, pendingOptions도 없으면 초기 메시지 전송 (지시사항 버튼 표시를 위해)
+          // ref를 사용하여 pendingOptions.length 체크 (의존성 배열에서 제거)
+          if (parsed.options.length === 0 && pendingOptionsRef.current.length === 0) {
+            setHasCheckedLoadGame(true);
+            const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 게임을 시작해주세요.`;
+            // 약간의 지연을 두어 모든 초기화가 완료되도록 함
+            setTimeout(() => {
+              if (handleSendRef.current) {
+                handleSendRef.current(teamMessage);
+              }
+            }, 500);
+          } else if (pendingOptionsRef.current.length > 0) {
+            // 옵션이 있으면 체크 완료로 표시 (지시사항 버튼이 이미 표시됨)
+            setHasCheckedLoadGame(true);
+          }
+        } else {
+          // AI 메시지가 없으면 초기 메시지 전송
+          setHasCheckedLoadGame(true);
+          const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 게임을 시작해주세요.`;
+          setTimeout(() => {
+            if (handleSendRef.current) {
+              handleSendRef.current(teamMessage);
+            }
+          }, 500);
+        }
+      }, 1000); // handleLoad의 상태 업데이트 완료 대기
+      
+      return () => clearTimeout(checkTimer);
+    }
+  }, [selectedTeam, isModelReady, messages.length, shouldLoadGame, hasCheckedLoadGame, difficulty]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // 메시지 변경 시 헤더 정보 업데이트
+  useEffect(() => {
+    // 마지막 AI 메시지에서 날짜와 자금 정보 추출
+    const aiMessages = messages.filter(m => !m.isUser);
+    if (aiMessages.length > 0) {
+      const lastAIMessage = aiMessages[aiMessages.length - 1];
+      const parsed = parseAIResponse(lastAIMessage.text);
+      
+      // 날짜 추출
+      const extractedDate = extractDate(parsed.text);
+      if (extractedDate) {
+        setGameState(prev => ({ ...prev, date: extractedDate }));
+      }
+      
+      // 자금 추출
+      let extractedBudget = extractBudget(parsed.text);
+      console.log('[자금 파싱] 원본 텍스트:', lastAIMessage.text.substring(0, 200)); // 처음 200자만
+      console.log('[자금 파싱] 파싱된 텍스트:', parsed.text.substring(0, 200));
+      console.log('[자금 파싱] 추출된 자금 (난이도 적용 전):', extractedBudget);
+      
+      // 이지 모드인 경우 수입에 1.2배 적용 (AI가 이미 적용했을 수도 있지만, 확실하게 적용)
+      // 주의: AI가 이미 1.2배를 적용했다면 중복 적용되지 않도록 주의
+      // 여기서는 AI가 원본 금액을 제공한다고 가정하고, 클라이언트에서 배율 적용
+      // 단, 이미 배율이 적용된 경우를 구분하기 어려우므로, AI가 난이도에 맞게 계산한 값을 그대로 사용
+      // 이 부분은 AI가 프롬프트에 따라 자동으로 처리하므로 클라이언트에서는 그대로 사용
+      
+      if (extractedBudget !== null && extractedBudget > 0) { // 0보다 큰 값만 업데이트
+        console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget.toLocaleString('ko-KR') + '원');
+        setGameState(prev => ({ ...prev, budget: extractedBudget }));
+      } else {
+        console.log('[자금 파싱] ❌ 자금 추출 실패 또는 0원');
+      }
+    }
+  }, [messages]);
+  
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -577,6 +734,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
         readNewsCount, // 읽은 뉴스 개수도 저장
         selectedTeam: selectedTeam, // 팀 전체 정보 저장
         pendingOptions: pendingOptions, // 지시사항 버튼을 위한 옵션 저장
+        difficulty: difficulty, // 난이도 저장
         timestamp: new Date().toISOString(),
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
@@ -586,14 +744,23 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
       console.error('저장 오류:', e);
       alert('저장에 실패했습니다.');
     }
-  }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, pendingOptions, playSound]);
+  }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, pendingOptions, difficulty, playSound]);
 
   // 불러오기 기능
   const handleLoad = useCallback(async () => {
+    // 중복 호출 방지 (모바일 터치 이벤트 중복 방지)
+    if (isLoadProcessingRef.current) {
+      console.log('[불러오기] 이미 진행 중입니다.');
+      return;
+    }
+    
+    isLoadProcessingRef.current = true;
+    
     try {
       const savedData = localStorage.getItem(SAVE_KEY);
       if (!savedData) {
         alert('저장된 게임이 없습니다.');
+        isLoadProcessingRef.current = false;
         return;
       }
 
@@ -616,7 +783,12 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
 
       // 게임 상태 복원
       if (parsed.gameState) {
-        setGameState(parsed.gameState);
+        // 난이도 복원 (기존 저장 데이터 호환성)
+        const restoredGameState = {
+          ...parsed.gameState,
+          difficulty: parsed.gameState.difficulty || difficulty, // 저장된 난이도가 없으면 현재 난이도 사용
+        };
+        setGameState(restoredGameState);
       }
       if (parsed.facilities) {
         setFacilities(parsed.facilities);
@@ -639,11 +811,36 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
           history: history,
         });
         
-        // **지시사항 버튼 복원**: 저장된 옵션이 있으면 복원, 없으면 마지막 AI 메시지에서 파싱
+        // **지시사항 버튼 복원**: 저장된 옵션이 있으면 필터링하여 복원
         if (parsed.pendingOptions && Array.isArray(parsed.pendingOptions) && parsed.pendingOptions.length > 0) {
-          // 저장된 옵션 복원
-          setPendingOptions(parsed.pendingOptions);
-          setCurrentOptions(parsed.pendingOptions);
+          // 난이도 선택 및 지시사항 관련 옵션 필터링
+          const filteredOptions = parsed.pendingOptions.filter(opt => {
+            const label = opt.label.toLowerCase();
+            const value = opt.value.toLowerCase();
+            return !(
+              // 난이도 선택 관련 필터링
+              label.includes('이지 모드') || label.includes('하드 모드') ||
+              label.includes('easy mode') || label.includes('hard mode') ||
+              label.includes('난이도') || label.includes('difficulty') ||
+              value.includes('이지 모드') || value.includes('하드 모드') ||
+              value.includes('easy') || value.includes('hard') ||
+              value.includes('난이도') ||
+              // 지시사항/가이드 관련 필터링
+              label.includes('지시사항') || label.includes('가이드') ||
+              label.includes('guide') || label.includes('instruction') ||
+              value.includes('지시사항') || value.includes('가이드') ||
+              value.includes('guide') || value.includes('instruction')
+            );
+          });
+          
+          if (filteredOptions.length > 0) {
+            setPendingOptions(filteredOptions);
+            setCurrentOptions(filteredOptions);
+          } else {
+            // 필터링 후 옵션이 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
+            setPendingOptions([]);
+            setCurrentOptions([]);
+          }
         } else {
           // 저장된 옵션이 없으면 마지막 AI 메시지에서 옵션 파싱
           const aiMessages = parsed.messages.filter((m: Message) => !m.isUser);
@@ -651,9 +848,43 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
             const lastAIMessage = aiMessages[aiMessages.length - 1];
             const parsedResponse = parseAIResponse(lastAIMessage.text);
             if (parsedResponse.options.length > 0) {
-              setPendingOptions(parsedResponse.options);
-              setCurrentOptions(parsedResponse.options);
+              // 난이도 선택 및 지시사항 관련 옵션 필터링
+              const filteredOptions = parsedResponse.options.filter(opt => {
+                const label = opt.label.toLowerCase();
+                const value = opt.value.toLowerCase();
+                return !(
+                  // 난이도 선택 관련 필터링
+                  label.includes('이지 모드') || label.includes('하드 모드') ||
+                  label.includes('easy mode') || label.includes('hard mode') ||
+                  label.includes('난이도') || label.includes('difficulty') ||
+                  value.includes('이지 모드') || value.includes('하드 모드') ||
+                  value.includes('easy') || value.includes('hard') ||
+                  value.includes('난이도') ||
+                  // 지시사항/가이드 관련 필터링
+                  label.includes('지시사항') || label.includes('가이드') ||
+                  label.includes('guide') || label.includes('instruction') ||
+                  value.includes('지시사항') || value.includes('가이드') ||
+                  value.includes('guide') || value.includes('instruction')
+                );
+              });
+              
+              if (filteredOptions.length > 0) {
+                setPendingOptions(filteredOptions);
+                setCurrentOptions(filteredOptions);
+              } else {
+                // 필터링 후 옵션이 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
+                setPendingOptions([]);
+                setCurrentOptions([]);
+              }
+            } else {
+              // 옵션이 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
+              setPendingOptions([]);
+              setCurrentOptions([]);
             }
+          } else {
+            // AI 메시지가 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
+            setPendingOptions([]);
+            setCurrentOptions([]);
           }
         }
       }
@@ -663,6 +894,11 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
     } catch (e) {
       console.error('불러오기 오류:', e);
       alert('불러오기에 실패했습니다.');
+    } finally {
+      // 중복 방지 플래그 해제 (약간의 지연을 두어 상태 업데이트 완료 보장)
+      setTimeout(() => {
+        isLoadProcessingRef.current = false;
+      }, 500);
     }
   }, [playSound]);
 
@@ -705,6 +941,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
         budget={gameState.budget}
         date={gameState.date}
         season="2026 시즌"
+        difficulty={difficulty}
         onApiKeyClick={onResetApiKey}
         onFacilityClick={() => setIsFacilityOpen(true)}
         onNewsClick={() => {
@@ -718,7 +955,7 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
       />
 
       {/* 메인 - 채팅 영역 */}
-      <div className="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-4 md:py-6 overscroll-contain">
+      <div className="flex-1 overflow-y-auto px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 lg:py-6 overscroll-contain">
         <div className="max-w-5xl mx-auto w-full">
           {messages.map((msg, idx) => (
             <MessageBubble
@@ -776,14 +1013,14 @@ export default function ChatInterface({ apiKey, selectedTeam, onResetApiKey, sho
         onSelect={(value) => {
           handleOptionClick(value);
           setIsOptionsModalOpen(false);
-          setPendingOptions([]); // 선택 후 옵션 초기화
+          // 선택 후 옵션 초기화하지 않음 - 지시사항 버튼이 항상 보이도록 유지
         }}
         onClose={handleOptionsModalClose}
       />
 
-      {/* 작전 지시 플로팅 버튼 (트리거 방식) */}
+      {/* 작전 지시 플로팅 버튼 (트리거 방식) - 항상 표시 */}
       <AnimatePresence>
-        {!isOptionsModalOpen && !isLoading && pendingOptions.length > 0 && (
+        {!isOptionsModalOpen && !isLoading && (
           <motion.button
             initial={{ opacity: 0, scale: 0, y: 20 }}
             animate={{ 

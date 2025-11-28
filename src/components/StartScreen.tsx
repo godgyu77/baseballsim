@@ -1,3 +1,4 @@
+import React from 'react';
 import { motion } from 'framer-motion';
 import { FolderOpen, Play } from 'lucide-react';
 
@@ -7,20 +8,46 @@ interface StartScreenProps {
 }
 
 export default function StartScreen({ onLoadGame, onStartNew }: StartScreenProps) {
-  const handleLoadGame = () => {
-    const savedData = localStorage.getItem('baseball_game_save');
-    if (savedData) {
-      try {
-        const parsed = JSON.parse(savedData);
-        if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
-          onLoadGame();
-          return;
-        }
-      } catch (e) {
-        // 파싱 오류
-      }
+  const isProcessingRef = React.useRef(false);
+  
+  const handleLoadGame = (e?: React.MouseEvent | React.TouchEvent) => {
+    // 모바일 터치 이벤트 중복 방지
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
     }
-    alert('저장된 데이터가 없습니다.');
+    
+    // 중복 호출 방지
+    if (isProcessingRef.current) {
+      return;
+    }
+    
+    isProcessingRef.current = true;
+    
+    try {
+      const savedData = localStorage.getItem('baseball_game_save');
+      if (savedData) {
+        try {
+          const parsed = JSON.parse(savedData);
+          if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+            onLoadGame();
+            // 약간의 지연 후 플래그 해제
+            setTimeout(() => {
+              isProcessingRef.current = false;
+            }, 1000);
+            return;
+          }
+        } catch (e) {
+          // 파싱 오류
+          isProcessingRef.current = false;
+        }
+      }
+      alert('저장된 데이터가 없습니다.');
+      isProcessingRef.current = false;
+    } catch (error) {
+      console.error('불러오기 처리 오류:', error);
+      isProcessingRef.current = false;
+    }
   };
 
   return (
@@ -58,7 +85,8 @@ export default function StartScreen({ onLoadGame, onStartNew }: StartScreenProps
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={handleLoadGame}
-            className="flex items-center justify-center gap-3 bg-white hover:bg-gray-100 text-baseball-green font-bold text-lg px-8 py-4 rounded-xl shadow-2xl transition-all w-full sm:w-auto min-w-[200px]"
+            onTouchStart={handleLoadGame}
+            className="flex items-center justify-center gap-3 bg-white hover:bg-gray-100 text-baseball-green font-bold text-lg px-8 py-4 rounded-xl shadow-2xl transition-all w-full sm:w-auto min-w-[200px] touch-manipulation"
           >
             <FolderOpen className="w-6 h-6" />
             불러오기

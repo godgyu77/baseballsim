@@ -23,11 +23,11 @@ export default function TeamSelector({ onSelect }: TeamSelectorProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[#Fdfbf7] flex items-center justify-center p-3 sm:p-4">
-      <div className="max-w-4xl w-full">
-        <div className="text-center mb-4 sm:mb-6 md:mb-8">
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-baseball-green mb-2">⚾ 야구 매니지먼트 게임</h1>
-          <p className="text-gray-600 text-sm sm:text-base md:text-lg">팀을 선택하세요</p>
+    <div className="min-h-screen bg-[#Fdfbf7] flex items-center justify-center p-2 sm:p-3 md:p-4">
+      <div className="max-w-4xl w-full px-2 sm:px-4">
+        <div className="text-center mb-3 sm:mb-4 md:mb-6 lg:mb-8">
+          <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-baseball-green mb-1 sm:mb-2">⚾ 야구 매니지먼트 게임</h1>
+          <p className="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg">팀을 선택하세요</p>
         </div>
 
         <div className="relative">
@@ -46,7 +46,7 @@ export default function TeamSelector({ onSelect }: TeamSelectorProps) {
           </button>
 
           {/* 카드 컨테이너 */}
-          <div className="relative h-64 sm:h-80 md:h-96 overflow-hidden">
+          <div className="relative h-56 sm:h-64 md:h-80 lg:h-96 overflow-hidden">
             <AnimatePresence mode="wait">
               <motion.div
                 key={currentIndex}
@@ -57,17 +57,17 @@ export default function TeamSelector({ onSelect }: TeamSelectorProps) {
                 className="absolute inset-0 flex items-center justify-center"
               >
                 <div
-                  className="w-full max-w-md h-full rounded-xl sm:rounded-2xl shadow-2xl flex flex-col items-center justify-center p-4 sm:p-6 md:p-8 cursor-pointer transform transition-transform active:scale-95 sm:hover:scale-105 touch-manipulation"
+                  className="w-full max-w-md h-full rounded-lg sm:rounded-xl md:rounded-2xl shadow-2xl flex flex-col items-center justify-center p-3 sm:p-4 md:p-6 lg:p-8 cursor-pointer transform transition-transform active:scale-95 sm:hover:scale-105 touch-manipulation"
                   style={{
                     background: `linear-gradient(135deg, ${TEAMS[currentIndex].color} 0%, ${TEAMS[currentIndex].secondaryColor} 100%)`,
                   }}
                   onClick={handleSelect}
                 >
-                  <div className="text-5xl sm:text-6xl md:text-8xl mb-2 sm:mb-3 md:mb-4">{TEAMS[currentIndex].icon}</div>
-                  <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-white mb-1 sm:mb-2">
+                  <div className="text-4xl sm:text-5xl md:text-6xl lg:text-8xl mb-1 sm:mb-2 md:mb-3 lg:mb-4">{TEAMS[currentIndex].icon}</div>
+                  <h2 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold text-white mb-0.5 sm:mb-1 md:mb-2 text-center px-2 break-words">
                     {TEAMS[currentIndex].name}
                   </h2>
-                  <p className="text-white/90 text-sm sm:text-base md:text-lg">{TEAMS[currentIndex].fullName}</p>
+                  <p className="text-white/90 text-xs sm:text-sm md:text-base lg:text-lg text-center px-2 break-words">{TEAMS[currentIndex].fullName}</p>
                 </div>
               </motion.div>
             </AnimatePresence>

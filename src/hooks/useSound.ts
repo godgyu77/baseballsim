@@ -1,10 +1,16 @@
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 const DEFAULT_VOLUME = 0.3;
 
 export function useSound() {
   const [volume, setVolume] = useState(DEFAULT_VOLUME);
   const [isMuted, setIsMuted] = useState(false);
+  const volumeRef = useRef(volume);
+  const isMutedRef = useRef(isMuted);
+
+  // volume과 isMuted 변경 시 ref 업데이트
+  volumeRef.current = volume;
+  isMutedRef.current = isMuted;
 
   // 무료 효과음 URL (Zapsplat 또는 다른 무료 사운드 라이브러리)
   const soundUrls = {
@@ -16,7 +22,7 @@ export function useSound() {
   };
 
   // 대체로 브라우저 내장 Audio API 사용 (간단한 beep)
-  const createBeepSound = (frequency: number, duration: number) => {
+  const createBeepSound = useCallback((frequency: number, duration: number) => {
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
@@ -27,15 +33,15 @@ export function useSound() {
     oscillator.frequency.value = frequency;
     oscillator.type = 'sine';
 
-    gainNode.gain.setValueAtTime(isMuted ? 0 : volume, audioContext.currentTime);
+    gainNode.gain.setValueAtTime(isMutedRef.current ? 0 : volumeRef.current, audioContext.currentTime);
     gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
 
     oscillator.start(audioContext.currentTime);
     oscillator.stop(audioContext.currentTime + duration);
-  };
+  }, []);
 
-  const playSound = (soundName: keyof typeof soundUrls) => {
-    if (isMuted) return;
+  const playSound = useCallback((soundName: keyof typeof soundUrls) => {
+    if (isMutedRef.current) return;
 
     try {
       // 간단한 beep 사운드 생성
@@ -53,7 +59,7 @@ export function useSound() {
     } catch (error) {
       console.warn('사운드 재생 실패:', error);
     }
-  };
+  }, [createBeepSound]);
 
   const toggleMute = () => {
     setIsMuted(!isMuted);

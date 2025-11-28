@@ -2,14 +2,16 @@ import { useState, useEffect } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import ApiKeyModal from './components/ApiKeyModal';
 import StartScreen from './components/StartScreen';
+import DifficultyModal from './components/DifficultyModal';
 import TeamSelector from './components/TeamSelector';
 import ChatInterface from './components/ChatInterface';
 import { Team } from './constants/TeamData';
 import { GamePhase } from './lib/utils';
+import { Difficulty } from './constants/GameConfig';
 
 const SAVE_KEY = 'baseball_game_save';
 
-type ScreenView = 'start' | 'team_select' | 'game';
+type ScreenView = 'start' | 'difficulty_select' | 'team_select' | 'game';
 
 function App() {
   const [apiKey, setApiKey] = useState<string>('');
@@ -17,6 +19,7 @@ function App() {
   const [screenView, setScreenView] = useState<ScreenView>('start');
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [shouldLoadGame, setShouldLoadGame] = useState(false);
+  const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
 
   useEffect(() => {
     // 로컬 스토리지에서 API 키 확인
@@ -39,6 +42,7 @@ function App() {
     setShowApiKeyModal(true);
     setScreenView('start');
     setSelectedTeam(null);
+    setDifficulty(null);
   };
 
   const handleTeamSelect = (team: Team) => {
@@ -47,7 +51,7 @@ function App() {
   };
 
   const handleLoadGame = () => {
-    // 저장된 데이터에서 팀 정보 복원
+    // 저장된 데이터에서 팀 정보 및 난이도 복원
     const savedData = localStorage.getItem(SAVE_KEY);
     if (savedData) {
       try {
@@ -55,6 +59,12 @@ function App() {
         if (parsed.selectedTeam) {
           // 팀 정보 복원
           setSelectedTeam(parsed.selectedTeam);
+          // 난이도 복원 (저장된 데이터에 있으면 사용, 없으면 기본값 HARD)
+          if (parsed.difficulty) {
+            setDifficulty(parsed.difficulty);
+          } else {
+            setDifficulty('HARD'); // 기존 저장 데이터 호환성
+          }
           setShouldLoadGame(true);
           setScreenView('game');
           return;
@@ -74,11 +84,17 @@ function App() {
     localStorage.removeItem(SAVE_KEY);
     setShouldLoadGame(false);
     setSelectedTeam(null);
+    setDifficulty(null);
+    setScreenView('difficulty_select');
+  };
+
+  const handleDifficultySelect = (selectedDifficulty: Difficulty) => {
+    setDifficulty(selectedDifficulty);
     setScreenView('team_select');
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F7FA]">
+    <div className="min-h-screen bg-[#F5F7FA] px-2 sm:px-0">
       <AnimatePresence mode="wait">
         {showApiKeyModal ? (
           <ApiKeyModal key="api-key-modal" onApiKeySet={handleApiKeySet} />
@@ -88,13 +104,20 @@ function App() {
             onLoadGame={handleLoadGame}
             onStartNew={handleStartNewGame}
           />
+        ) : screenView === 'difficulty_select' ? (
+          <DifficultyModal
+            key="difficulty-modal"
+            isOpen={true}
+            onSelect={handleDifficultySelect}
+          />
         ) : screenView === 'team_select' ? (
           <TeamSelector key="team-selector" onSelect={handleTeamSelect} />
-        ) : screenView === 'game' && selectedTeam ? (
+        ) : screenView === 'game' && selectedTeam && difficulty ? (
           <ChatInterface 
             key="chat-interface" 
             apiKey={apiKey} 
             selectedTeam={selectedTeam}
+            difficulty={difficulty}
             onResetApiKey={handleResetApiKey}
             shouldLoadGame={shouldLoadGame}
             onGameLoaded={() => setShouldLoadGame(false)}
