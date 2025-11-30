@@ -68,8 +68,8 @@ export default function TeamSelector({ onSelect }: TeamSelectorProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[#Fdfbf7] flex items-center justify-center p-0 sm:p-2 md:p-4 overflow-x-hidden">
-      <div className="w-full max-w-4xl px-3 sm:px-4 md:px-6">
+    <div className="min-h-screen bg-[#Fdfbf7] flex items-center justify-center p-0 sm:p-2 md:p-4 overflow-x-hidden w-full" style={{ maxWidth: '100vw' }}>
+      <div className="w-full max-w-4xl px-2 sm:px-4 md:px-6" style={{ maxWidth: '100%', overflowX: 'hidden' }}>
         {/* 헤더 */}
         <div className="text-center mb-4 sm:mb-6 md:mb-8 px-2">
           <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-baseball-green mb-1 sm:mb-2">⚾ 야구 매니지먼트 게임</h1>
@@ -77,16 +77,17 @@ export default function TeamSelector({ onSelect }: TeamSelectorProps) {
         </div>
 
         {/* 모바일 전용 레이아웃 */}
-        <div className="block md:hidden">
+        <div className="block md:hidden w-full" style={{ maxWidth: '100%', overflowX: 'hidden' }}>
           <div 
             ref={containerRef}
             className="relative w-full"
+            style={{ maxWidth: '100%', overflowX: 'hidden' }}
             onTouchStart={onTouchStart}
             onTouchMove={onTouchMove}
             onTouchEnd={onTouchEnd}
           >
             {/* 카드 컨테이너 - 모바일 */}
-            <div className="relative h-[280px] sm:h-[320px] overflow-hidden mx-2">
+            <div className="relative h-[280px] sm:h-[320px] overflow-hidden mx-1 sm:mx-2" style={{ maxWidth: 'calc(100% - 0.5rem)' }}>
               <AnimatePresence mode="wait">
                 <motion.div
                   key={currentIndex}
@@ -94,12 +95,14 @@ export default function TeamSelector({ onSelect }: TeamSelectorProps) {
                   animate={{ opacity: 1, x: 0, scale: 1 }}
                   exit={{ opacity: 0, x: -300, scale: 0.9 }}
                   transition={{ duration: 0.25 }}
-                  className="absolute inset-0 flex items-center justify-center px-2"
+                  className="absolute inset-0 flex items-center justify-center px-1"
+                  style={{ maxWidth: '100%' }}
                 >
                   <div
                     className="w-full h-full rounded-xl shadow-2xl flex flex-col items-center justify-center p-4 sm:p-6 cursor-pointer transform transition-transform active:scale-[0.98] touch-manipulation"
                     style={{
                       background: `linear-gradient(135deg, ${ALL_TEAMS[currentIndex].color} 0%, ${ALL_TEAMS[currentIndex].secondaryColor} 100%)`,
+                      maxWidth: '100%',
                     }}
                     onClick={handleSelect}
                   >
@@ -118,21 +121,29 @@ export default function TeamSelector({ onSelect }: TeamSelectorProps) {
               </AnimatePresence>
             </div>
 
-            {/* 좌우 화살표 - 모바일 (카드 내부) */}
-            <div className="absolute left-2 right-2 top-1/2 -translate-y-1/2 z-10 pointer-events-none flex justify-between">
+            {/* 좌우 화살표 - 모바일 (카드 내부, 크게) */}
+            <div className="absolute left-1 right-1 top-1/2 -translate-y-1/2 z-10 pointer-events-none flex justify-between" style={{ width: 'calc(100% - 0.5rem)' }}>
               <button
-                onClick={handlePrevious}
-                className="pointer-events-auto bg-white/90 hover:bg-white shadow-lg rounded-full p-2 transition-colors touch-manipulation"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handlePrevious();
+                }}
+                className="pointer-events-auto bg-white/95 hover:bg-white shadow-xl rounded-full p-3 sm:p-4 transition-colors touch-manipulation min-w-[48px] min-h-[48px] flex items-center justify-center"
                 aria-label="이전 팀"
+                style={{ width: '48px', height: '48px' }}
               >
-                <ChevronLeft className="w-5 h-5 text-baseball-green" />
+                <ChevronLeft className="w-6 h-6 sm:w-7 sm:h-7 text-baseball-green" />
               </button>
               <button
-                onClick={handleNext}
-                className="pointer-events-auto bg-white/90 hover:bg-white shadow-lg rounded-full p-2 transition-colors touch-manipulation"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleNext();
+                }}
+                className="pointer-events-auto bg-white/95 hover:bg-white shadow-xl rounded-full p-3 sm:p-4 transition-colors touch-manipulation min-w-[48px] min-h-[48px] flex items-center justify-center"
                 aria-label="다음 팀"
+                style={{ width: '48px', height: '48px' }}
               >
-                <ChevronRight className="w-5 h-5 text-baseball-green" />
+                <ChevronRight className="w-6 h-6 sm:w-7 sm:h-7 text-baseball-green" />
               </button>
             </div>
 
@@ -146,6 +157,7 @@ export default function TeamSelector({ onSelect }: TeamSelectorProps) {
                     idx === currentIndex ? 'bg-baseball-green w-8' : 'bg-gray-300 w-2'
                   }`}
                   aria-label={`팀 ${idx + 1} 선택`}
+                  style={{ minWidth: '8px', minHeight: '8px' }}
                 />
               ))}
             </div>
@@ -154,7 +166,8 @@ export default function TeamSelector({ onSelect }: TeamSelectorProps) {
             <div className="mt-4 sm:mt-6 flex justify-center px-2">
               <button
                 onClick={handleSelect}
-                className="px-8 py-3 bg-baseball-gold hover:bg-baseball-gold-dark active:bg-baseball-gold-dark text-baseball-green font-bold text-base rounded-lg shadow-lg transition-colors touch-manipulation w-full max-w-xs"
+                className="px-8 py-4 bg-baseball-gold hover:bg-baseball-gold-dark active:bg-baseball-gold-dark text-baseball-green font-bold text-base sm:text-lg rounded-lg shadow-lg transition-colors touch-manipulation w-full max-w-xs min-h-[52px]"
+                style={{ minHeight: '52px' }}
               >
                 선택하기
               </button>
