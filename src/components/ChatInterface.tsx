@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Building2, Newspaper, ClipboardList } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { getGeminiModel } from '../lib/gemini';
 import GameHeader from './GameHeader';
@@ -11,7 +11,7 @@ import RandomEventModal from './RandomEventModal';
 import FacilityManagement from './FacilityManagement';
 import OptionsModal from './OptionsModal';
 import NewsSidebar, { NewsItem } from './NewsSidebar';
-import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo } from '../lib/utils';
+import { parseAIResponse, extractDate, extractBudget, extractTeamName, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo } from '../lib/utils';
 import { Team } from '../constants/TeamData';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
@@ -38,19 +38,23 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [currentOptions, setCurrentOptions] = useState<Array<{ label: string; value: string }>>([]);
+  const [currentOptions, setCurrentOptions] = useState<Array<{ label: string; value: string; style?: 'primary' | 'secondary' | 'danger' }>>([]);
   const [gameState, setGameState] = useState<{ 
     date: string | null; 
     budget: number | null;
     morale: number; // 팀 사기 (0 ~ 100)
     fanLoyalty: number; // 팬 충성도 (0 ~ 100)
     difficulty: Difficulty; // 난이도
+    salaryCapUsage?: number; // 샐러리캡 소진율 (0.0 ~ 100.0)
+    teamName?: string; // 구단 이름 (신생 구단 창단 시 사용)
   }>({
     date: null,
     budget: null, // 초기값은 null (0이 아닌 null로 명확히 구분)
     morale: 50, // 초기값 50
     fanLoyalty: 50, // 초기값 50
     difficulty: difficulty, // 난이도 저장
+    salaryCapUsage: undefined, // 초기값 없음
+    teamName: undefined, // 초기값 없음
   });
   const [gamePhase, setGamePhase] = useState<GamePhase>('MAIN_GAME');
   const [guiEvent, setGuiEvent] = useState<GUIEvent | null>(null);
@@ -62,7 +66,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
   const [facilities, setFacilities] = useState<FacilityState>(createInitialFacilityState());
   const [loadingStatusText, setLoadingStatusText] = useState<string | undefined>(undefined);
   const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
-  const [pendingOptions, setPendingOptions] = useState<Array<{ label: string; value: string }>>([]);
+  const [pendingOptions, setPendingOptions] = useState<Array<{ label: string; value: string; style?: 'primary' | 'secondary' | 'danger' }>>([]);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [isNewsOpen, setIsNewsOpen] = useState(false);
   const [readNewsCount, setReadNewsCount] = useState(0); // 읽은 뉴스 개수 추적
@@ -75,7 +79,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
   const isLoadingRef = useRef(false);
   const handleSendRef = useRef<((messageText: string) => Promise<void>) | null>(null);
   const { playSound } = useSound();
-  
+
   // handleSend 함수를 최상단으로 이동 (TDZ 문제 해결)
   const handleSend = useCallback(async (messageText: string) => {
     if (!messageText.trim() || isLoadingRef.current) return;
@@ -83,6 +87,15 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
     playSound('click');
     const userMessage = messageText.trim();
     setInput('');
+    
+    // 신생 구단인 경우 구단 이름 추출 시도 (이미 설정된 경우 덮어쓰지 않음)
+    if (selectedTeam.id === 'expansion') {
+      const extractedTeamName = extractTeamName(userMessage);
+      if (extractedTeamName && !gameState.teamName) {
+        // 팀 이름이 아직 설정되지 않은 경우에만 설정
+        setGameState(prev => ({ ...prev, teamName: extractedTeamName }));
+      }
+    }
     
     // 사용자 메시지를 먼저 추가
     setMessages((prev) => [...prev, { text: userMessage, isUser: true }]);
@@ -168,14 +181,18 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
               setGameState(prev => ({ ...prev, date: parsed.status!.date! }));
             }
             if (parsed.status.budget) {
-              // "50억 원" 형식에서 숫자 추출
-              const budgetMatch = parsed.status.budget.match(/([0-9,.]+)\s*억/i);
+              // "50억 원" 또는 "-30.0억 원" 형식에서 숫자 추출 (마이너스 값도 처리)
+              const budgetMatch = parsed.status.budget.match(/(-?[0-9,.]+)\s*억/i);
               if (budgetMatch) {
                 const amount = parseFloat(budgetMatch[1].replace(/,/g, ''));
-                if (!isNaN(amount) && amount > 0) {
+                if (!isNaN(amount)) {
+                  // 마이너스 값도 허용 (부채 상태)
                   setGameState(prev => ({ ...prev, budget: Math.floor(amount * 100000000) }));
                 }
               }
+            }
+            if (parsed.status.salaryCapUsage !== undefined) {
+              setGameState(prev => ({ ...prev, salaryCapUsage: parsed.status!.salaryCapUsage }));
             }
           }
           
@@ -227,7 +244,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
           if (parsed.guiEvent) {
             console.log('[GUI_EVENT] 수신:', parsed.guiEvent);
             // 모달을 표시하지 않고 채팅으로만 표시
-            playSound('success');
+              playSound('success');
           } else {
             playSound('success');
           }
@@ -486,8 +503,38 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
       setPendingOptions(prev => prev.length === 0 ? prev : []);
       setCurrentOptions(prev => prev.length === 0 ? prev : []);
       
-      const difficultyText = difficulty === 'EASY' ? '이지 모드' : '하드 모드';
-      const teamMessage = `${selectedTeam.fullName}을 선택했습니다. ${difficultyText}로 게임을 시작해주세요.`;
+      // 신생 구단인 경우 특별 처리
+      // 프롬프트의 Step 2에 따라 난이도를 명시적으로 전달
+      const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
+      const difficultyCode = difficulty; // EASY, NORMAL, HELL
+      
+      // 난이도별 초기 자금 및 샐러리캡 정보를 명시적으로 전달 (AI가 변경하지 못하도록)
+      const difficultyConfig = difficulty === 'EASY' 
+        ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
+        : difficulty === 'NORMAL'
+        ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
+        : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
+      
+      let teamMessage: string;
+      if (selectedTeam.id === 'expansion') {
+        // 프롬프트 Step 2-1: 신생 구단 창단 절차 시작
+        teamMessage = `✨ 신생 구단 창단 (11구단)을 선택했습니다. 
+
+**[난이도 설정 - 절대 변경 금지]**
+난이도: ${difficultyMode} (${difficultyCode})
+${difficultyConfig}
+
+이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 신생 구단 창단 프로세스를 시작해주세요.`;
+      } else {
+        // 프롬프트 Step 2: 구단 선택 완료, Step 3으로 진행
+        teamMessage = `${selectedTeam.fullName}을 선택했습니다. 
+
+**[난이도 설정 - 절대 변경 금지]**
+난이도: ${difficultyMode} (${difficultyCode})
+${difficultyConfig}
+
+이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 Step 3: 데이터 초기화 및 게임을 시작해주세요.`;
+      }
       // 약간의 지연을 두어 모든 초기화가 완료되도록 함
       const timer = setTimeout(() => {
         if (handleSendRef.current) {
@@ -554,23 +601,28 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
       const lastAIMessage = aiMessages[aiMessages.length - 1];
       const parsed = parseAIResponse(lastAIMessage.text);
       
-      // 날짜 추출
-      const extractedDate = extractDate(parsed.text);
-      if (extractedDate) {
-        setGameState(prev => ({ ...prev, date: extractedDate }));
+      // 날짜 추출 (STATUS 태그 우선, 없으면 텍스트에서 추출)
+      if (parsed.status?.date) {
+        setGameState(prev => ({ ...prev, date: parsed.status!.date! }));
+      } else {
+        const extractedDate = extractDate(parsed.text);
+        if (extractedDate) {
+          setGameState(prev => ({ ...prev, date: extractedDate }));
+        }
       }
       
-      // 자금 추출
-      let extractedBudget = extractBudget(parsed.text);
-      console.log('[자금 파싱] 원본 텍스트:', lastAIMessage.text.substring(0, 200)); // 처음 200자만
-      console.log('[자금 파싱] 파싱된 텍스트:', parsed.text.substring(0, 200));
-      console.log('[자금 파싱] 추출된 자금 (난이도 적용 전):', extractedBudget);
+      // 자금 추출 (STATUS 태그 우선, 없으면 텍스트에서 추출)
+      let extractedBudget: number | null = null;
       
-      // 이지 모드인 경우 수입에 1.2배 적용 (AI가 이미 적용했을 수도 있지만, 확실하게 적용)
-      // 주의: AI가 이미 1.2배를 적용했다면 중복 적용되지 않도록 주의
-      // 여기서는 AI가 원본 금액을 제공한다고 가정하고, 클라이언트에서 배율 적용
-      // 단, 이미 배율이 적용된 경우를 구분하기 어려우므로, AI가 난이도에 맞게 계산한 값을 그대로 사용
-      // 이 부분은 AI가 프롬프트에 따라 자동으로 처리하므로 클라이언트에서는 그대로 사용
+      // 1순위: STATUS 태그에서 자금 추출
+      if (parsed.status?.budgetValue) {
+        extractedBudget = parsed.status.budgetValue;
+        console.log('[자금 파싱] ✅ STATUS 태그에서 자금 추출:', extractedBudget.toLocaleString('ko-KR') + '원');
+      } else {
+        // 2순위: 텍스트에서 자금 추출
+        extractedBudget = extractBudget(parsed.text);
+        console.log('[자금 파싱] 텍스트에서 자금 추출:', extractedBudget);
+      }
       
       if (extractedBudget !== null && extractedBudget > 0) { // 0보다 큰 값만 업데이트
         console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget.toLocaleString('ko-KR') + '원');
@@ -578,8 +630,17 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
       } else {
         console.log('[자금 파싱] ❌ 자금 추출 실패 또는 0원');
       }
+      
+      // 팀명 추출 (AI 응답에서도 추출 시도, 이미 설정된 경우 덮어쓰지 않음)
+      if (selectedTeam.id === 'expansion') {
+        const extractedTeamName = extractTeamName(lastAIMessage.text);
+        if (extractedTeamName && !gameState.teamName) {
+          // 팀 이름이 아직 설정되지 않은 경우에만 설정
+          setGameState(prev => ({ ...prev, teamName: extractedTeamName }));
+        }
+      }
     }
-  }, [messages]);
+  }, [messages, selectedTeam.id]);
   
   useEffect(() => {
     isLoadingRef.current = isLoading;
@@ -778,11 +839,11 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
       }
 
       // 메시지 복원
-      setMessages(parsed.messages);
+        setMessages(parsed.messages);
       messagesRef.current = parsed.messages;
 
       // 게임 상태 복원
-      if (parsed.gameState) {
+        if (parsed.gameState) {
         // 난이도 복원 (기존 저장 데이터 호환성)
         const restoredGameState = {
           ...parsed.gameState,
@@ -881,7 +942,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
               setPendingOptions([]);
               setCurrentOptions([]);
             }
-          } else {
+      } else {
             // AI 메시지가 없으면 빈 배열로 설정 (일정 진행 버튼만 표시)
             setPendingOptions([]);
             setCurrentOptions([]);
@@ -936,22 +997,20 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
   return (
     <div className="flex flex-col h-screen bg-[#Fdfbf7]">
       {/* 헤더 - 상태바 */}
-      <GameHeader
-        teamName={selectedTeam.fullName}
+      <GameHeader 
+        teamName={
+          selectedTeam.id === 'expansion' 
+            ? (gameState.teamName || '신규구단')
+            : (gameState.teamName || selectedTeam.fullName)
+        }
         budget={gameState.budget}
         date={gameState.date}
         season="2026 시즌"
         difficulty={difficulty}
+        salaryCapUsage={gameState.salaryCapUsage}
         onApiKeyClick={onResetApiKey}
-        onFacilityClick={() => setIsFacilityOpen(true)}
-        onNewsClick={() => {
-          setIsNewsOpen(true);
-          // 뉴스를 열면 읽은 것으로 표시 (알림 제거)
-          setReadNewsCount(newsItems.length);
-        }}
         onSaveClick={handleSave}
         onLoadClick={handleLoad}
-        newsCount={Math.max(0, newsItems.length - readNewsCount)}
       />
 
       {/* 메인 - 채팅 영역 */}
@@ -975,6 +1034,44 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
         {/* 입력 폼 */}
         <form onSubmit={handleSubmit} className="p-2 sm:p-3 md:p-4">
           <div className="flex gap-2 sm:gap-3 max-w-5xl mx-auto">
+            {/* 지시사항, 뉴스 및 시설 관리 버튼 */}
+            <div className="flex items-center gap-1 sm:gap-1.5 border-r border-baseball-green/20 pr-1.5 sm:pr-2 md:pr-3 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOptionsModalOpen(true);
+                  playSound('click');
+                }}
+                className="p-2 hover:bg-baseball-green/10 rounded-lg transition-colors touch-manipulation min-w-[44px] min-h-[44px] flex items-center justify-center active:bg-baseball-green/20"
+                title="작전 지시"
+              >
+                <ClipboardList className="w-5 h-5 text-baseball-green" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsNewsOpen(true);
+                  setReadNewsCount(newsItems.length);
+                }}
+                className="p-2 hover:bg-baseball-green/10 rounded-lg transition-colors relative touch-manipulation min-w-[44px] min-h-[44px] flex items-center justify-center active:bg-baseball-green/20"
+                title="뉴스"
+              >
+                <Newspaper className="w-5 h-5 text-baseball-green" />
+                {Math.max(0, newsItems.length - readNewsCount) > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 bg-baseball-gold text-baseball-green text-[9px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center">
+                    {Math.max(0, newsItems.length - readNewsCount) > 9 ? '9+' : Math.max(0, newsItems.length - readNewsCount)}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFacilityOpen(true)}
+                className="p-2 hover:bg-baseball-green/10 rounded-lg transition-colors touch-manipulation min-w-[44px] min-h-[44px] flex items-center justify-center active:bg-baseball-green/20"
+                title="시설 관리"
+              >
+                <Building2 className="w-5 h-5 text-baseball-green" />
+              </button>
+            </div>
             <motion.input
               whileFocus={{ scale: 1.01 }}
               type="text"
@@ -1018,87 +1115,6 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
         onClose={handleOptionsModalClose}
       />
 
-      {/* 작전 지시 플로팅 버튼 (트리거 방식) - 항상 표시 */}
-      <AnimatePresence>
-        {!isOptionsModalOpen && !isLoading && (
-          <motion.button
-            initial={{ opacity: 0, scale: 0, y: 20 }}
-            animate={{ 
-              opacity: 1, 
-              scale: 1, 
-              y: 0,
-            }}
-            exit={{ opacity: 0, scale: 0, y: 20 }}
-            whileHover={{ scale: 1.05, y: -2 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => {
-              setIsOptionsModalOpen(true);
-              playSound('click');
-            }}
-            className="fixed bottom-20 sm:bottom-24 right-3 sm:right-4 md:right-6 z-40 bg-gradient-to-r from-baseball-green to-[#0a3528] text-white px-4 sm:px-4 md:px-5 py-3 sm:py-3 md:py-4 rounded-full shadow-2xl hover:shadow-3xl transition-all border-2 border-baseball-gold/30 flex items-center justify-center gap-1.5 sm:gap-2 group cursor-pointer touch-manipulation min-w-[56px] min-h-[56px] safe-area-bottom"
-            title="작전 지시 확인"
-          >
-            {/* 펄스 애니메이션 링 (외부 링) */}
-            <motion.div
-              className="absolute inset-0 rounded-full bg-baseball-green/20"
-              animate={{
-                scale: [1, 1.4, 1],
-                opacity: [0.6, 0, 0.6],
-              }}
-              transition={{
-                duration: 2.5,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-            />
-            
-            {/* 펄스 애니메이션 링 (내부 링) */}
-            <motion.div
-              className="absolute inset-0 rounded-full bg-baseball-gold/20"
-              animate={{
-                scale: [1, 1.2, 1],
-                opacity: [0.4, 0, 0.4],
-              }}
-              transition={{
-                duration: 2,
-                repeat: Infinity,
-                ease: "easeInOut",
-                delay: 0.3,
-              }}
-            />
-            
-            {/* 버튼 내용 */}
-            <motion.span
-              animate={{
-                scale: [1, 1.08, 1],
-              }}
-              transition={{
-                duration: 2,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-              className="text-base sm:text-lg md:text-xl relative z-10"
-            >
-              📋
-            </motion.span>
-            <span className="text-[10px] sm:text-xs md:text-sm font-bold hidden md:inline whitespace-nowrap relative z-10">
-              작전 지시
-            </span>
-            
-            {/* 알림 뱃지 (선택지 개수) */}
-            {pendingOptions.length > 0 && (
-              <motion.span
-                initial={{ scale: 0, rotate: -180 }}
-                animate={{ scale: 1, rotate: 0 }}
-                exit={{ scale: 0, rotate: 180 }}
-                className="absolute -top-0.5 sm:-top-1 -right-0.5 sm:-right-1 bg-baseball-gold text-baseball-green text-[9px] sm:text-[10px] font-bold rounded-full w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center border-2 border-white shadow-lg relative z-10"
-              >
-                {pendingOptions.length > 9 ? '9+' : pendingOptions.length}
-              </motion.span>
-            )}
-          </motion.button>
-        )}
-      </AnimatePresence>
 
       {/* 이벤트 모달 - 선수 목록 모달은 표시하지 않음 */}
 

@@ -41,83 +41,123 @@ export default function DifficultyModal({ isOpen, onSelect }: DifficultyModalPro
 
               {/* Content */}
               <div className="p-4 sm:p-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                   {/* 이지 모드 */}
                   <motion.button
                     whileHover={{ scale: 1.02, y: -2 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => onSelect('EASY')}
-                    className="p-5 sm:p-6 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl hover:border-green-500 transition-all text-left touch-manipulation"
+                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl hover:border-green-500 transition-all text-left touch-manipulation"
                   >
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="p-2 bg-green-500 rounded-lg">
-                        <Trophy className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
+                    <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                      <div className="p-1.5 sm:p-2 bg-green-500 rounded-lg">
+                        <Trophy className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 text-white" />
                       </div>
                       <div>
-                        <h3 className="text-lg sm:text-xl font-bold text-green-800">이지 모드</h3>
-                        <p className="text-xs sm:text-sm text-green-600">초보자 추천</p>
+                        <h3 className="text-base sm:text-lg md:text-xl font-bold text-green-800">이지 모드</h3>
+                        <p className="text-[10px] sm:text-xs md:text-sm text-green-600">힐링/초보자</p>
                       </div>
                     </div>
-                    <ul className="space-y-2 text-xs sm:text-sm text-gray-700">
-                      <li className="flex items-start gap-2">
+                    <ul className="space-y-1.5 sm:space-y-2 text-[10px] sm:text-xs md:text-sm text-gray-700">
+                      <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-green-600 mt-0.5">•</span>
-                        <span>초기 자금: <strong className="text-green-800">50.0억 원</strong></span>
+                        <span>초기 자금: <strong className="text-green-800">80.0억 원</strong></span>
                       </li>
-                      <li className="flex items-start gap-2">
+                      <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-green-600 mt-0.5">•</span>
-                        <span>선수단 샐러리캡: <strong className="text-green-800">200억 원</strong></span>
+                        <span>선수단 샐러리캡: <strong className="text-green-800">250억 원</strong></span>
                       </li>
-                      <li className="flex items-start gap-2">
+                      <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-green-600 mt-0.5">•</span>
-                        <span>용병 샐러리캡: <strong className="text-green-800">60억 원</strong></span>
+                        <span>용병 샐러리캡: <strong className="text-green-800">무제한</strong></span>
                       </li>
-                      <li className="flex items-start gap-2">
+                      <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-green-600 mt-0.5">•</span>
-                        <span>수입 <strong className="text-green-800">1.2배</strong> 보너스</span>
+                        <span>수입 <strong className="text-green-800">1.5배</strong> 보너스</span>
                       </li>
-                      <li className="flex items-start gap-2">
+                      <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-green-600 mt-0.5">•</span>
-                        <span>소프트 캡 (사치세 적용)</span>
+                        <span>부상 없음, 성장 2배</span>
                       </li>
                     </ul>
                   </motion.button>
 
-                  {/* 하드 모드 */}
+                  {/* 노말 모드 */}
                   <motion.button
                     whileHover={{ scale: 1.02, y: -2 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => onSelect('HARD')}
-                    className="p-5 sm:p-6 bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-300 rounded-xl hover:border-red-500 transition-all text-left touch-manipulation"
+                    onClick={() => onSelect('NORMAL')}
+                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-blue-50 to-cyan-50 border-2 border-blue-300 rounded-xl hover:border-blue-500 transition-all text-left touch-manipulation"
                   >
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="p-2 bg-red-600 rounded-lg">
-                        <Shield className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
+                    <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                      <div className="p-1.5 sm:p-2 bg-blue-500 rounded-lg">
+                        <Shield className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 text-white" />
                       </div>
                       <div>
-                        <h3 className="text-lg sm:text-xl font-bold text-red-800">하드 모드</h3>
-                        <p className="text-xs sm:text-sm text-red-600">현실적 난이도</p>
+                        <h3 className="text-base sm:text-lg md:text-xl font-bold text-blue-800">노말 모드</h3>
+                        <p className="text-[10px] sm:text-xs md:text-sm text-blue-600">현실적/추천</p>
                       </div>
                     </div>
-                    <ul className="space-y-2 text-xs sm:text-sm text-gray-700">
-                      <li className="flex items-start gap-2">
-                        <span className="text-red-600 mt-0.5">•</span>
-                        <span>초기 자금: <strong className="text-red-800">20.0억 원</strong></span>
+                    <ul className="space-y-1.5 sm:space-y-2 text-[10px] sm:text-xs md:text-sm text-gray-700">
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-blue-600 mt-0.5">•</span>
+                        <span>초기 자금: <strong className="text-blue-800">30.0억 원</strong></span>
                       </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-red-600 mt-0.5">•</span>
-                        <span>선수단 샐러리캡: <strong className="text-red-800">137억 원</strong></span>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-blue-600 mt-0.5">•</span>
+                        <span>선수단 샐러리캡: <strong className="text-blue-800">137억 원</strong></span>
                       </li>
-                      <li className="flex items-start gap-2">
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-blue-600 mt-0.5">•</span>
+                        <span>용병 샐러리캡: <strong className="text-blue-800">55억 원</strong></span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-blue-600 mt-0.5">•</span>
+                        <span>수입 보너스 없음</span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-blue-600 mt-0.5">•</span>
+                        <span>순수 데이터 기반</span>
+                      </li>
+                    </ul>
+                  </motion.button>
+
+                  {/* 헬 모드 */}
+                  <motion.button
+                    whileHover={{ scale: 1.02, y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => onSelect('HELL')}
+                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-300 rounded-xl hover:border-red-500 transition-all text-left touch-manipulation"
+                  >
+                    <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                      <div className="p-1.5 sm:p-2 bg-red-600 rounded-lg">
+                        <Shield className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="text-base sm:text-lg md:text-xl font-bold text-red-800">헬 모드</h3>
+                        <p className="text-[10px] sm:text-xs md:text-sm text-red-600">극한도전</p>
+                      </div>
+                    </div>
+                    <ul className="space-y-1.5 sm:space-y-2 text-[10px] sm:text-xs md:text-sm text-gray-700">
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-red-600 mt-0.5">•</span>
+                        <span>초기 자금: <strong className="text-red-800">10.0억 원</strong></span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-red-600 mt-0.5">•</span>
+                        <span>선수단 샐러리캡: <strong className="text-red-800">100억 원</strong></span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-red-600 mt-0.5">•</span>
                         <span>용병 샐러리캡: <strong className="text-red-800">40억 원</strong></span>
                       </li>
-                      <li className="flex items-start gap-2">
+                      <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-red-600 mt-0.5">•</span>
-                        <span>수입 보너스 없음</span>
+                        <span>수입 <strong className="text-red-800">0.8배</strong> 감소</span>
                       </li>
-                      <li className="flex items-start gap-2">
+                      <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-red-600 mt-0.5">•</span>
-                        <span>하드 캡 (초과 시 진행 불가)</span>
+                        <span>부상 지옥, 하드 캡</span>
                       </li>
                     </ul>
                   </motion.button>

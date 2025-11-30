@@ -69,7 +69,7 @@ export default function StartScreen({ onLoadGame, onStartNew }: StartScreenProps
             KBO 프로야구
           </h1>
           <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-baseball-gold mb-6 drop-shadow-lg">
-            단장 시뮬레이터
+            단장 웹 시뮬레이터
           </h2>
           <div className="text-6xl sm:text-7xl md:text-8xl mb-8 text-white">⚾</div>
         </motion.div>

@@ -4,6 +4,7 @@ import { X, ChevronRight } from 'lucide-react';
 interface Option {
   label: string;
   value: string;
+  style?: 'primary' | 'secondary' | 'danger';
 }
 
 interface OptionsModalProps {
@@ -120,11 +121,11 @@ export default function OptionsModal({
                         (value.includes('일정') && value.includes('진행')) ||
                         (value.includes('다음') && (value.includes('날') || value.includes('일'))) ||
                         // 난이도 선택 관련 필터링
-                        label.includes('이지 모드') || label.includes('하드 모드') ||
-                        label.includes('easy mode') || label.includes('hard mode') ||
+                        label.includes('이지 모드') || label.includes('노말 모드') || label.includes('헬 모드') ||
+                        label.includes('easy mode') || label.includes('normal mode') || label.includes('hell mode') ||
                         label.includes('난이도') || label.includes('difficulty') ||
-                        value.includes('이지 모드') || value.includes('하드 모드') ||
-                        value.includes('easy') || value.includes('hard') ||
+                        value.includes('이지 모드') || value.includes('노말 모드') || value.includes('헬 모드') ||
+                        value.includes('easy') || value.includes('normal') || value.includes('hell') ||
                         value.includes('난이도') ||
                         // 지시사항/가이드 관련 필터링
                         label.includes('지시사항') || label.includes('가이드') ||
@@ -133,28 +134,61 @@ export default function OptionsModal({
                         value.includes('guide') || value.includes('instruction')
                       );
                     })
-                    .map((option, index) => (
-                      <motion.button
-                        key={index}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: (index + 1) * 0.05 }}
-                        whileHover={{ scale: 1.02, x: 5 }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => {
-                          onSelect(option.value);
-                          onClose();
-                        }}
-                        className="w-full text-left px-2.5 sm:px-3 md:px-4 lg:px-5 py-2 sm:py-2.5 md:py-3 lg:py-4 bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 border border-baseball-green/30 sm:border-2 rounded-md sm:rounded-lg hover:border-baseball-green active:border-baseball-green active:bg-gradient-to-r active:from-baseball-green/20 active:to-baseball-green/10 hover:bg-gradient-to-r hover:from-baseball-green/20 hover:to-baseball-green/10 transition-all group touch-manipulation min-h-[44px] sm:min-h-[48px]"
-                      >
-                        <div className="flex items-center justify-between gap-1.5 sm:gap-2">
-                          <span className="font-semibold text-[11px] sm:text-xs md:text-sm lg:text-base text-gray-800 group-hover:text-baseball-green group-active:text-baseball-green transition-colors break-words flex-1 leading-relaxed">
-                            {option.label}
-                          </span>
-                          <ChevronRight className="w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4 lg:w-5 lg:h-5 text-baseball-green opacity-70 sm:opacity-50 sm:opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity flex-shrink-0" />
-                        </div>
-                      </motion.button>
-                    ))}
+                    .map((option, index) => {
+                      // style에 따른 스타일 클래스 결정
+                      const getStyleClasses = () => {
+                        switch (option.style) {
+                          case 'primary':
+                            return 'bg-gradient-to-r from-baseball-green/20 to-baseball-green/10 border-baseball-green/50 hover:from-baseball-green/30 hover:to-baseball-green/20';
+                          case 'danger':
+                            return 'bg-gradient-to-r from-red-50 to-red-100/50 border-red-300/50 hover:from-red-100 hover:to-red-200/50';
+                          case 'secondary':
+                          default:
+                            return 'bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 border-baseball-green/30 hover:from-baseball-green/20 hover:to-baseball-green/10';
+                        }
+                      };
+                      
+                      const getTextColor = () => {
+                        switch (option.style) {
+                          case 'danger':
+                            return 'text-red-800 group-hover:text-red-900';
+                          default:
+                            return 'text-gray-800 group-hover:text-baseball-green group-active:text-baseball-green';
+                        }
+                      };
+                      
+                      const getIconColor = () => {
+                        switch (option.style) {
+                          case 'danger':
+                            return 'text-red-600';
+                          default:
+                            return 'text-baseball-green';
+                        }
+                      };
+                      
+                      return (
+                        <motion.button
+                          key={index}
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: (index + 1) * 0.05 }}
+                          whileHover={{ scale: 1.02, x: 5 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => {
+                            onSelect(option.value);
+                            onClose();
+                          }}
+                          className={`w-full text-left px-2.5 sm:px-3 md:px-4 lg:px-5 py-2 sm:py-2.5 md:py-3 lg:py-4 ${getStyleClasses()} border sm:border-2 rounded-md sm:rounded-lg hover:border-baseball-green active:border-baseball-green transition-all group touch-manipulation min-h-[44px] sm:min-h-[48px]`}
+                        >
+                          <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+                            <span className={`font-semibold text-[11px] sm:text-xs md:text-sm lg:text-base ${getTextColor()} transition-colors break-words flex-1 leading-relaxed`}>
+                              {option.label}
+                            </span>
+                            <ChevronRight className={`w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4 lg:w-5 lg:h-5 ${getIconColor()} opacity-70 sm:opacity-50 sm:opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity flex-shrink-0`} />
+                          </div>
+                        </motion.button>
+                      );
+                    })}
                 </div>
 
                 {/* 하단 안내 */}

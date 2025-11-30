@@ -71,6 +71,27 @@ function MessageBubble({
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
+              // 제목 스타일링 (H1, H2, H3 구분)
+              h1: ({ children }: any) => (
+                <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-baseball-green mb-3 mt-4 pt-2 border-b-2 border-baseball-green/30 pb-2 first:mt-0">
+                  {children}
+                </h1>
+              ),
+              h2: ({ children }: any) => (
+                <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-[#0a3528] mb-2 mt-3 pt-1 border-b border-baseball-green/20 pb-1">
+                  {children}
+                </h2>
+              ),
+              h3: ({ children }: any) => (
+                <h3 className="text-base sm:text-lg md:text-xl font-semibold text-baseball-green mb-2 mt-2">
+                  {children}
+                </h3>
+              ),
+              h4: ({ children }: any) => (
+                <h4 className="text-sm sm:text-base md:text-lg font-semibold text-gray-700 mb-1 mt-2">
+                  {children}
+                </h4>
+              ),
               // 표 스타일링 (컴팩트, 고정 헤더, 반응형)
               table: ({ children }: any) => (
                 <div className="w-full overflow-x-auto my-3 -mx-2 sm:-mx-4 px-2 sm:px-4 touch-pan-x" style={{ WebkitOverflowScrolling: 'touch' }}>

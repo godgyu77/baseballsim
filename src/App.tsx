@@ -45,9 +45,24 @@ function App() {
     setDifficulty(null);
   };
 
-  const handleTeamSelect = (team: Team) => {
-    setSelectedTeam(team);
-    setScreenView('game');
+  const handleTeamSelect = (team: Team | 'expansion') => {
+    if (team === 'expansion') {
+      // 신생 구단 선택 시 특별 처리
+      // 임시로 expansion 팀 객체 생성 (나중에 사용자가 이름을 정할 수 있음)
+      const expansionTeam: Team = {
+        id: 'expansion',
+        name: '신생 구단',
+        fullName: '신생 구단 (이름 미정)',
+        color: '#8B5CF6',
+        secondaryColor: '#EC4899',
+        icon: '⭐',
+      };
+      setSelectedTeam(expansionTeam);
+      setScreenView('game');
+    } else {
+      setSelectedTeam(team);
+      setScreenView('game');
+    }
   };
 
   const handleLoadGame = () => {
@@ -59,11 +74,16 @@ function App() {
         if (parsed.selectedTeam) {
           // 팀 정보 복원
           setSelectedTeam(parsed.selectedTeam);
-          // 난이도 복원 (저장된 데이터에 있으면 사용, 없으면 기본값 HARD)
+          // 난이도 복원 (저장된 데이터에 있으면 사용, 없으면 기본값 NORMAL)
           if (parsed.difficulty) {
-            setDifficulty(parsed.difficulty);
+            // 기존 HARD는 HELL로 매핑 (호환성)
+            if (parsed.difficulty === 'HARD') {
+              setDifficulty('HELL');
+            } else {
+              setDifficulty(parsed.difficulty);
+            }
           } else {
-            setDifficulty('HARD'); // 기존 저장 데이터 호환성
+            setDifficulty('NORMAL'); // 기본값을 노말 모드로 변경
           }
           setShouldLoadGame(true);
           setScreenView('game');
@@ -94,7 +114,7 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F7FA] px-2 sm:px-0">
+    <div className="min-h-screen bg-[#F5F7FA] px-0 sm:px-2 overflow-x-hidden">
       <AnimatePresence mode="wait">
         {showApiKeyModal ? (
           <ApiKeyModal key="api-key-modal" onApiKeySet={handleApiKeySet} />

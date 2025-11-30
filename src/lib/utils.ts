@@ -16,6 +16,7 @@ export interface GUIEvent {
 export interface StatusInfo {
   date?: string;
   budget?: string;
+  budgetValue?: number; // 숫자 형태의 자금 값 (억 단위)
 }
 
 export interface NewsItem {
@@ -237,11 +238,13 @@ function removeSystemTags(text: string): string {
   
   // 최종적으로 텍스트 끝의 ] 제거 (여러 번 반복, 더 강력하게)
   let finalIterations = 0;
-  while (finalIterations < 5) {
+  while (finalIterations < 10) {
     const beforeFinal = cleaned;
     cleaned = cleaned.replace(/\]+$/gm, ''); // 각 줄 끝의 모든 ]
     cleaned = cleaned.replace(/\s+\]+$/g, ''); // 끝에 있는 공백과 ]
     cleaned = cleaned.replace(/\]\s*$/g, ''); // 끝의 ]
+    cleaned = cleaned.replace(/\]\s*\n\s*$/g, '\n'); // 줄바꿈 전 ]
+    cleaned = cleaned.replace(/\]\s*$/g, ''); // 끝의 ] (다시 한 번)
     cleaned = cleaned.trim();
     
     if (cleaned === beforeFinal) break;
@@ -252,9 +255,55 @@ function removeSystemTags(text: string): string {
   cleaned = cleaned.replace(/\n\s*\n\s*\n+/g, '\n\n');
   cleaned = cleaned.trim();
   
-  // 마지막 한 번 더 확인하여 끝의 ] 제거
+  // 마지막 한 번 더 확인하여 끝의 ] 제거 (더 강력하게)
   cleaned = cleaned.replace(/\]+$/g, '');
   cleaned = cleaned.replace(/\s+\]+$/g, '');
+  cleaned = cleaned.replace(/\]\s*$/g, '');
+  cleaned = cleaned.trim();
+  
+  // 혼자 떨어진 대괄호 쌍 제거 (빈 대괄호)
+  cleaned = cleaned.replace(/\[\s*\]/g, '');
+  cleaned = cleaned.replace(/\[\s*\]\s*/g, '');
+  
+  // 텍스트 끝의 모든 대괄호 제거 (최종 확인)
+  cleaned = cleaned.replace(/[\[\]]+$/g, '');
+  cleaned = cleaned.replace(/\s+[\[\]]+\s*$/g, '');
+  cleaned = cleaned.trim();
+  
+  // 백틱(`) 문자 제거 (마크다운 코드 블록 찌꺼기)
+  // 여러 번 반복하여 확실히 제거
+  let backtickIterations = 0;
+  while (backtickIterations < 10) {
+    const beforeBacktick = cleaned;
+    
+    // 혼자 떨어진 백틱 1-2개 제거 (3개 이상은 코드 블록이므로 보존)
+    cleaned = cleaned.replace(/\b`{1,2}\b/g, ''); // 단어 경계 사이의 백틱 1-2개
+    cleaned = cleaned.replace(/\s`{1,2}\s/g, ' '); // 공백 사이의 백틱 1-2개
+    cleaned = cleaned.replace(/^`{1,2}\s/gm, ''); // 줄 시작의 백틱 1-2개
+    cleaned = cleaned.replace(/\s`{1,2}$/gm, ''); // 줄 끝의 백틱 1-2개
+    cleaned = cleaned.replace(/^`{1,2}$/gm, ''); // 줄 전체가 백틱 1-2개인 경우
+    
+    // 텍스트 끝의 백틱 제거
+    cleaned = cleaned.replace(/`+$/g, ''); // 끝의 모든 백틱 제거
+    cleaned = cleaned.replace(/\s+`+$/g, ''); // 공백과 함께 끝의 백틱 제거
+    cleaned = cleaned.replace(/`+\s*$/g, ''); // 백틱과 공백 제거
+    
+    // 텍스트 시작의 백틱 제거
+    cleaned = cleaned.replace(/^`+/gm, ''); // 줄 시작의 모든 백틱 제거
+    
+    // 공백 사이의 백틱 제거
+    cleaned = cleaned.replace(/\s+`+\s+/g, ' '); // 공백 사이의 백틱 제거
+    cleaned = cleaned.replace(/`+\s+/g, ' '); // 백틱 뒤 공백 제거
+    cleaned = cleaned.replace(/\s+`+/g, ' '); // 공백 뒤 백틱 제거
+    
+    cleaned = cleaned.trim();
+    
+    if (cleaned === beforeBacktick) break;
+    backtickIterations++;
+  }
+  
+  // 빈 줄 정리
+  cleaned = cleaned.replace(/\n\s*\n\s*\n+/g, '\n\n');
   cleaned = cleaned.trim();
   
   return cleaned;
@@ -363,7 +412,12 @@ export function parseAIResponse(message: string): ParsedMessage {
         status.date = `${year}년 ${parseInt(month)}월 ${parseInt(day)}일`;
       }
       if (budgetMatch && budgetMatch[1]) {
-        status.budget = budgetMatch[1] + '억 원';
+        const budgetStr = budgetMatch[1].replace(/,/g, '');
+        const budgetValue = parseFloat(budgetStr);
+        if (!isNaN(budgetValue) && budgetValue > 0) {
+          status.budget = budgetMatch[1] + '억 원';
+          status.budgetValue = budgetValue * 100000000; // 억 단위를 원 단위로 변환
+        }
       }
     } catch (e) {
       console.warn('STATUS 파싱 오류:', e);
@@ -480,5 +534,104 @@ export function extractBudget(text: string): number | null {
   }
 
   return null;
+}
+
+/**
+ * 텍스트에서 구단 이름을 추출합니다 (신생 구단 창단 시 사용)
+ * @param text 사용자 입력 또는 AI 응답 텍스트
+ * @returns 추출된 구단 이름 (없으면 null)
+ */
+export function extractTeamName(text: string): string | null {
+  // 제외할 키워드 목록 (이런 단어가 포함된 텍스트는 팀 이름으로 추출하지 않음)
+  const excludeKeywords = [
+    '당신의', '새로운', '노말', '이지', '헬', '모드', '난이도', 'difficulty',
+    '선택', '설정', '적용', '변경', '금지', '절대', '시즌', 'season',
+    '구단', '팀', '야구단', '연고지', 'city', 'team', 'name'
+  ];
+  
+  // 다양한 패턴 시도
+  const patterns = [
+    // "구단 이름을 '제주 감귤스'로 정했습니다", "팀 이름을 '제주 감귤스'로 정했습니다"
+    /(?:구단|팀)\s*이름[을를]\s*['"]([가-힣a-zA-Z0-9\s]+?)['"]/i,
+    // "구단 이름은 '제주 감귤스'입니다", "팀 이름은 '제주 감귤스'입니다"
+    /(?:구단|팀)\s*이름[은는]\s*['"]([가-힣a-zA-Z0-9\s]+?)['"]/i,
+    // "팀이름은 감귤 파이터즈야", "팀 이름은 감귤 파이터즈", "팀이름: 감귤 파이터즈"
+    /(?:팀\s*이름|팀이름|구단\s*이름|구단이름)[은는:\s]+([가-힣a-zA-Z0-9\s]+?)(?:야|입니다|이다|로|으로|입니다|\.|$)/i,
+    // "연고지는 제주도이고 팀이름은 감귤 파이터즈야"
+    /(?:팀이름|팀\s*이름)[은는:\s]+([가-힣a-zA-Z0-9\s]+?)(?:야|입니다|이다|로|으로|입니다|\.|$)/i,
+    // "제주 감귤 파이터즈", "감귤 파이터즈" (직접 언급) - 단, "구단", "팀", "야구단" 앞에 오는 경우만
+    /([가-힣a-zA-Z0-9\s]+?)\s*(?:구단|팀|야구단)(?:\s|$|입니다|이다|\.)/i,
+    // "팀 이름: 감귤 파이터즈"
+    /(?:팀|구단)\s*이름[:\s]+([가-힣a-zA-Z0-9\s]+?)(?:입니다|이다|로|으로|\.|$)/i,
+    // "제주 감귤스로 정했습니다", "제주 감귤스로 결정했습니다"
+    /([가-힣a-zA-Z0-9\s]+?)\s*(?:로|으로)\s*(?:정했습니다|결정했습니다|설정했습니다)/i,
+    // "구단명은 제주 감귤스입니다", "팀명은 제주 감귤스입니다"
+    /(?:구단명|팀명)[은는:\s]+([가-힣a-zA-Z0-9\s]+?)(?:입니다|이다|\.|$)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const teamName = match[1].trim();
+      
+      // 제외 키워드 체크
+      const containsExcludeKeyword = excludeKeywords.some(keyword => 
+        teamName.includes(keyword)
+      );
+      if (containsExcludeKeyword) {
+        continue; // 다음 패턴 시도
+      }
+      
+      // 너무 짧거나 의미 없는 이름은 제외
+      // "로", "으로", "입니다", "이다" 같은 단어가 포함된 경우 제외
+      if (teamName.length >= 2 && teamName.length <= 30 && 
+          !/^(로|으로|입니다|이다|야|입니다|\.)$/.test(teamName)) {
+        return teamName;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 입력된 연고지가 대한민국의 실제 도시인지 검증합니다
+ * @param city 입력된 연고지 이름
+ * @returns 유효한 도시인 경우 true, 그렇지 않으면 false
+ */
+export function isValidKoreanCity(city: string): boolean {
+  if (!city || city.trim().length === 0) return false;
+  
+  const normalizedCity = city.trim().replace(/시$/, '').replace(/특별시$/, '').replace(/광역시$/, '').replace(/특별자치시$/, '');
+  
+  // 대한민국 도시 목록 (시 단위)
+  const validCities = [
+    // 특별시
+    '서울',
+    // 광역시
+    '부산', '대구', '인천', '광주', '대전', '울산',
+    // 특별자치시
+    '세종',
+    // 경기도
+    '수원', '고양', '용인', '성남', '부천', '안산', '안양', '남양주', '화성', '평택', '의정부', '시흥', '파주', '광명', '김포', '광주', '군포', '이천', '오산', '하남', '양주', '구리', '안성', '포천', '의왕', '여주', '동두천',
+    // 강원특별자치도
+    '춘천', '원주', '강릉', '동해', '태백', '속초', '삼척',
+    // 충청북도
+    '청주', '충주', '제천',
+    // 충청남도
+    '천안', '공주', '보령', '아산', '서산', '논산', '계룡', '당진',
+    // 전북특별자치도
+    '전주', '군산', '익산', '정읍', '남원', '김제',
+    // 전라남도
+    '목포', '여수', '순천', '나주', '광양',
+    // 경상북도
+    '포항', '경주', '김천', '안동', '구미', '영주', '영천', '상주', '문경', '경산',
+    // 경상남도
+    '창원', '진주', '통영', '사천', '김해', '밀양', '거제', '양산',
+    // 제주특별자치도
+    '제주', '서귀포',
+  ];
+  
+  return validCities.includes(normalizedCity);
 }
 

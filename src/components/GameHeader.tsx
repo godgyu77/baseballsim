@@ -1,4 +1,4 @@
-import { Calendar, DollarSign, Building2, Trophy, KeyRound, Settings, Newspaper, Save, FolderOpen } from 'lucide-react';
+import { Calendar, DollarSign, Building2, Trophy, KeyRound, Save, FolderOpen } from 'lucide-react';
 
 import { Difficulty } from '../constants/GameConfig';
 
@@ -8,12 +8,10 @@ interface GameHeaderProps {
   date?: string | null;
   season?: string;
   difficulty?: Difficulty;
+  salaryCapUsage?: number; // 샐러리캡 소진율 (0.0 ~ 100.0)
   onApiKeyClick?: () => void;
-  onFacilityClick?: () => void;
-  onNewsClick?: () => void;
   onSaveClick?: () => void;
   onLoadClick?: () => void;
-  newsCount?: number;
 }
 
 export default function GameHeader({ 
@@ -22,12 +20,10 @@ export default function GameHeader({
   date = null,
   season = '2026 시즌',
   difficulty,
+  salaryCapUsage,
   onApiKeyClick,
-  onFacilityClick,
-  onNewsClick,
   onSaveClick,
-  onLoadClick,
-  newsCount = 0
+  onLoadClick
 }: GameHeaderProps) {
   // budget이 null이거나 0이면 "시즌 준비 중" 표시
   const displayBudget = (budget !== null && budget > 0) ? budget.toLocaleString('ko-KR') + '원' : '시즌 준비 중';
@@ -48,9 +44,11 @@ export default function GameHeader({
                 <span className={`px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold ${
                   difficulty === 'EASY' 
                     ? 'bg-green-500 text-white' 
+                    : difficulty === 'NORMAL'
+                    ? 'bg-blue-500 text-white'
                     : 'bg-red-600 text-white'
                 }`}>
-                  {difficulty === 'EASY' ? '이지' : '하드'}
+                  {difficulty === 'EASY' ? '이지' : difficulty === 'NORMAL' ? '노말' : '헬'}
                 </span>
               </>
             )}
@@ -63,8 +61,8 @@ export default function GameHeader({
           
           {/* 오른쪽: 버튼 및 정보 */}
           <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 lg:gap-4 flex-shrink-0 flex-wrap w-full sm:w-auto justify-end">
-            {/* 시설 관리, 뉴스, 저장/불러오기 및 API 키 설정 버튼 */}
-            {(onFacilityClick || onNewsClick || onSaveClick || onLoadClick || onApiKeyClick) && (
+            {/* 저장/불러오기 및 API 키 설정 버튼 */}
+            {(onSaveClick || onLoadClick || onApiKeyClick) && (
               <div className="flex items-center gap-0.5 sm:gap-1 md:gap-2 border-r border-baseball-gold/40 pr-0.5 sm:pr-1 md:pr-2 lg:pr-4">
                 {onSaveClick && (
                   <button
@@ -82,29 +80,6 @@ export default function GameHeader({
                     title="게임 불러오기"
                   >
                     <FolderOpen className="w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5 text-baseball-gold" />
-                  </button>
-                )}
-                {onFacilityClick && (
-                  <button
-                    onClick={onFacilityClick}
-                    className="p-1.5 sm:p-1.5 md:p-2 hover:bg-white/10 rounded transition-colors touch-manipulation min-w-[36px] min-h-[36px] sm:min-w-[40px] sm:min-h-[40px] flex items-center justify-center"
-                    title="시설 관리"
-                  >
-                    <Settings className="w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5 text-baseball-gold" />
-                  </button>
-                )}
-                {onNewsClick && (
-                  <button
-                    onClick={onNewsClick}
-                    className="p-1.5 sm:p-1.5 md:p-2 hover:bg-white/10 rounded transition-colors relative touch-manipulation min-w-[36px] min-h-[36px] sm:min-w-[40px] sm:min-h-[40px] flex items-center justify-center"
-                    title="뉴스"
-                  >
-                    <Newspaper className="w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5 text-baseball-gold" />
-                    {newsCount > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 sm:-top-1 sm:-right-1 bg-baseball-gold text-baseball-green text-[9px] sm:text-[10px] font-bold rounded-full w-3.5 h-3.5 sm:w-4 sm:h-4 flex items-center justify-center">
-                        {newsCount > 9 ? '9+' : newsCount}
-                      </span>
-                    )}
                   </button>
                 )}
                 {onApiKeyClick && (
@@ -138,6 +113,23 @@ export default function GameHeader({
               <span className="hidden lg:inline text-baseball-gold/60">|</span>
               <span className="font-mono font-semibold text-[10px] sm:text-xs md:text-sm truncate">{displayDate}</span>
             </div>
+            
+            {salaryCapUsage !== undefined && (
+              <>
+                <span className="hidden md:inline text-baseball-gold/60">|</span>
+                <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
+                  <span className="hidden lg:inline text-xs text-gray-300 font-sans">샐러리캡</span>
+                  <span className="hidden lg:inline text-baseball-gold/60">|</span>
+                  <span className={`font-mono font-semibold text-[10px] sm:text-xs md:text-sm ${
+                    salaryCapUsage >= 90 ? 'text-red-400' : 
+                    salaryCapUsage >= 70 ? 'text-yellow-400' : 
+                    'text-green-400'
+                  }`}>
+                    {salaryCapUsage.toFixed(1)}%
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
