@@ -27,6 +27,7 @@ interface ChatInterfaceProps {
   apiKey: string;
   selectedTeam: Team;
   difficulty: Difficulty;
+  expansionTeamData?: { city: string; teamName: string; ownerType: 'A' | 'B' | 'C' | 'D' } | null;
   onResetApiKey?: () => void;
   shouldLoadGame?: boolean;
   onGameLoaded?: () => void;
@@ -34,7 +35,7 @@ interface ChatInterfaceProps {
 
 const SAVE_KEY = 'baseball_game_save';
 
-export default function ChatInterface({ apiKey, selectedTeam, difficulty, onResetApiKey, shouldLoadGame = false, onGameLoaded }: ChatInterfaceProps) {
+export default function ChatInterface({ apiKey, selectedTeam, difficulty, expansionTeamData, onResetApiKey, shouldLoadGame = false, onGameLoaded }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -522,7 +523,20 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
       let teamMessage: string;
       if (selectedTeam.id === 'expansion') {
         // 프롬프트 Step 2-1: 신생 구단 창단 절차 시작
+        const ownerTypeName = expansionTeamData?.ownerType === 'A' 
+          ? 'A유형: 성적 지상주의 (Win-Now)'
+          : expansionTeamData?.ownerType === 'B'
+          ? 'B유형: 비즈니스맨 (Profit-First)'
+          : expansionTeamData?.ownerType === 'C'
+          ? 'C유형: 시스템/재건 (Rebuilder)'
+          : 'D유형: 의리의 대부 (The Godfather)';
+        
         teamMessage = `✨ 신생 구단 창단 (11구단)을 선택했습니다. 
+
+**[구단 정보]**
+연고지: ${expansionTeamData?.city || '미정'}
+구단명: ${expansionTeamData?.teamName || '미정'}
+구단주 유형: ${ownerTypeName}
 
 **[난이도 설정 - 절대 변경 금지]**
 난이도: ${difficultyMode} (${difficultyCode})

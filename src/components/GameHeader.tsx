@@ -32,7 +32,8 @@ export default function GameHeader({
   return (
     <div className="bg-gradient-to-r from-[#0F4C3A] to-[#0a3528] text-white shadow-lg border-b-2 border-baseball-gold">
       <div className="container mx-auto px-2 sm:px-3 md:px-6 py-1.5 sm:py-2 md:py-3">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
+        {/* 모바일: 한 줄 통합 레이아웃 */}
+        <div className="flex items-center justify-between gap-2 sm:gap-3">
           {/* 왼쪽: 팀 정보 */}
           <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0 flex-1">
             <Building2 className="w-4 h-4 sm:w-5 sm:h-5 text-baseball-gold flex-shrink-0" />
@@ -59,8 +60,8 @@ export default function GameHeader({
             </div>
           </div>
           
-          {/* 오른쪽: 버튼 및 정보 */}
-          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 lg:gap-4 flex-shrink-0 flex-wrap w-full sm:w-auto justify-end">
+          {/* 오른쪽: 버튼 및 정보 (모바일에서는 자금 정보 제거) */}
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 lg:gap-4 flex-shrink-0">
             {/* 저장/불러오기 및 API 키 설정 버튼 */}
             {(onSaveClick || onLoadClick || onApiKeyClick) && (
               <div className="flex items-center gap-0.5 sm:gap-1 md:gap-2 border-r border-baseball-gold/40 pr-0.5 sm:pr-1 md:pr-2 lg:pr-4">
@@ -94,9 +95,9 @@ export default function GameHeader({
               </div>
             )}
 
+            {/* 데스크톱에서만 자금 정보 표시 */}
             <span className="hidden md:inline text-baseball-gold/60">|</span>
-            
-            <div className="flex items-center gap-0.5 sm:gap-1 md:gap-1.5 min-w-0">
+            <div className="hidden md:flex items-center gap-0.5 sm:gap-1 md:gap-1.5 min-w-0">
               <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4 text-[#C5A059] flex-shrink-0" />
               <span className="hidden lg:inline text-xs text-gray-300 font-sans">보유 자금</span>
               <span className="hidden lg:inline text-baseball-gold/60">|</span>
@@ -117,7 +118,7 @@ export default function GameHeader({
             {salaryCapUsage !== undefined && (
               <>
                 <span className="hidden md:inline text-baseball-gold/60">|</span>
-                <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
+                <div className="hidden md:flex items-center gap-0.5 sm:gap-1 min-w-0">
                   <span className="hidden lg:inline text-xs text-gray-300 font-sans">샐러리캡</span>
                   <span className="hidden lg:inline text-baseball-gold/60">|</span>
                   <span className={`font-mono font-semibold text-[10px] sm:text-xs md:text-sm ${

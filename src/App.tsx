@@ -4,6 +4,7 @@ import ApiKeyModal from './components/ApiKeyModal';
 import StartScreen from './components/StartScreen';
 import DifficultyModal from './components/DifficultyModal';
 import TeamSelector from './components/TeamSelector';
+import ExpansionTeamForm, { OwnerType } from './components/ExpansionTeamForm';
 import ChatInterface from './components/ChatInterface';
 import { Team } from './constants/TeamData';
 import { GamePhase } from './lib/utils';
@@ -11,7 +12,7 @@ import { Difficulty } from './constants/GameConfig';
 
 const SAVE_KEY = 'baseball_game_save';
 
-type ScreenView = 'start' | 'difficulty_select' | 'team_select' | 'game';
+type ScreenView = 'start' | 'difficulty_select' | 'team_select' | 'expansion_form' | 'game';
 
 function App() {
   const [apiKey, setApiKey] = useState<string>('');
@@ -20,6 +21,7 @@ function App() {
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [shouldLoadGame, setShouldLoadGame] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
+  const [expansionTeamData, setExpansionTeamData] = useState<{ city: string; teamName: string; ownerType: OwnerType } | null>(null);
 
   useEffect(() => {
     // 로컬 스토리지에서 API 키 확인
@@ -47,22 +49,31 @@ function App() {
 
   const handleTeamSelect = (team: Team | 'expansion') => {
     if (team === 'expansion') {
-      // 신생 구단 선택 시 특별 처리
-      // 임시로 expansion 팀 객체 생성 (나중에 사용자가 이름을 정할 수 있음)
-      const expansionTeam: Team = {
-        id: 'expansion',
-        name: '신생 구단',
-        fullName: '신생 구단 (이름 미정)',
-        color: '#8B5CF6',
-        secondaryColor: '#EC4899',
-        icon: '⭐',
-      };
-      setSelectedTeam(expansionTeam);
-      setScreenView('game');
+      // 신생 구단 선택 시 정보 입력 화면으로 이동
+      setScreenView('expansion_form');
     } else {
       setSelectedTeam(team);
       setScreenView('game');
     }
+  };
+
+  const handleExpansionTeamComplete = (data: { city: string; teamName: string; ownerType: OwnerType }) => {
+    setExpansionTeamData(data);
+    // 신생 구단 정보를 바탕으로 팀 객체 생성
+    const expansionTeam: Team = {
+      id: 'expansion',
+      name: data.teamName,
+      fullName: `${data.city} ${data.teamName}`,
+      color: '#8B5CF6',
+      secondaryColor: '#EC4899',
+      icon: '⭐',
+    };
+    setSelectedTeam(expansionTeam);
+    setScreenView('game');
+  };
+
+  const handleExpansionTeamBack = () => {
+    setScreenView('team_select');
   };
 
   const handleLoadGame = () => {
@@ -132,12 +143,19 @@ function App() {
           />
         ) : screenView === 'team_select' ? (
           <TeamSelector key="team-selector" onSelect={handleTeamSelect} />
+        ) : screenView === 'expansion_form' ? (
+          <ExpansionTeamForm
+            key="expansion-form"
+            onComplete={handleExpansionTeamComplete}
+            onBack={handleExpansionTeamBack}
+          />
         ) : screenView === 'game' && selectedTeam && difficulty ? (
           <ChatInterface 
             key="chat-interface" 
             apiKey={apiKey} 
             selectedTeam={selectedTeam}
             difficulty={difficulty}
+            expansionTeamData={expansionTeamData}
             onResetApiKey={handleResetApiKey}
             shouldLoadGame={shouldLoadGame}
             onGameLoaded={() => setShouldLoadGame(false)}
