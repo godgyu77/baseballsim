@@ -94,9 +94,9 @@ function MessageBubble({
               ),
               // 표 스타일링 (컴팩트, 고정 헤더, 반응형, 절대 깨짐 방지)
               table: ({ children }: any) => (
-                <div className="w-full overflow-x-auto my-3 -mx-2 sm:-mx-4 px-2 sm:px-4 touch-pan-x" style={{ WebkitOverflowScrolling: 'touch', maxWidth: '100%', overflowX: 'auto', overflowY: 'visible' }}>
-                  <div className="inline-block min-w-full align-middle" style={{ minWidth: 'max-content', display: 'inline-block' }}>
-                    <table className="border-collapse bg-white text-[9px] sm:text-[10px] md:text-xs whitespace-nowrap" style={{ tableLayout: 'auto', minWidth: 'max-content', width: 'auto', borderCollapse: 'collapse' }}>
+                <div className="w-full overflow-x-auto my-3 -mx-2 sm:-mx-4 px-2 sm:px-4 touch-pan-x" style={{ WebkitOverflowScrolling: 'touch', maxWidth: '100%', overflowX: 'auto', overflowY: 'visible', display: 'block' }}>
+                  <div className="inline-block min-w-full align-middle" style={{ minWidth: 'max-content', display: 'inline-block', width: 'max-content' }}>
+                    <table className="border-collapse bg-white text-[8px] sm:text-[9px] md:text-[10px] whitespace-nowrap" style={{ tableLayout: 'auto', minWidth: 'max-content', width: 'max-content', borderCollapse: 'collapse', display: 'table' }}>
                       {children}
                     </table>
                   </div>
@@ -129,28 +129,77 @@ function MessageBubble({
                   </tr>
                 );
               },
-              th: ({ children }: any) => (
-                <th className="border border-gray-300 px-1 sm:px-1.5 md:px-2 py-0.5 sm:py-1 md:py-1.5 text-left font-semibold text-[9px] sm:text-[10px] md:text-xs text-white bg-baseball-green whitespace-nowrap cursor-default" style={{ minWidth: '60px', maxWidth: '200px', wordBreak: 'keep-all', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {children}
-                </th>
-              ),
+              th: ({ children, ...props }: any) => {
+                const columnIndex = props['data-column-index'] ?? -1;
+                const headerText = typeof children === 'string' ? children : String(children);
+                // 컬럼별 최소 너비 설정 (짧은 컬럼은 더 작게)
+                const getMinWidth = () => {
+                  if (headerText.includes('구분')) return '40px';
+                  if (headerText.includes('포지션')) return '50px';
+                  if (headerText.includes('투구손') || headerText.includes('타격손')) return '45px';
+                  if (headerText.includes('이름')) return '80px';
+                  if (headerText.includes('구속') || headerText.includes('컨택') || headerText.includes('갭파') || headerText.includes('파워') || headerText.includes('선구') || headerText.includes('주루') || headerText.includes('수비') || headerText.includes('구위') || headerText.includes('제구') || headerText.includes('체력')) return '45px';
+                  if (headerText.includes('기록') || headerText.includes('Stats')) return '120px';
+                  if (headerText.includes('연봉')) return '50px';
+                  if (headerText.includes('비고')) return '80px';
+                  if (headerText.includes('원소속') || headerText.includes('변화구')) return '100px';
+                  return '60px';
+                };
+                
+                return (
+                  <th 
+                    className="border border-gray-300 px-0.5 sm:px-1 md:px-1.5 py-0.5 sm:py-1 md:py-1.5 text-left font-semibold text-[8px] sm:text-[9px] md:text-[10px] text-white bg-baseball-green whitespace-nowrap cursor-default" 
+                    style={{ 
+                      minWidth: getMinWidth(), 
+                      wordBreak: 'keep-all', 
+                      overflow: 'hidden', 
+                      textOverflow: 'ellipsis',
+                      paddingLeft: '2px',
+                      paddingRight: '2px'
+                    }}
+                  >
+                    {children}
+                  </th>
+                );
+              },
               td: ({ children, ...props }: any) => {
                 const columnIndex = props['data-column-index'] ?? -1;
                 const cellText = typeof children === 'string' ? children : String(children);
                 // 첫 번째 컬럼(구분: 1군/2군) 스타일링
                 const isDivisionColumn = columnIndex === 0 && (cellText.trim() === '1군' || cellText.trim() === '2군');
                 
+                // 컬럼별 최소 너비 설정 (헤더와 동일하게)
+                const getMinWidth = () => {
+                  // 컬럼 인덱스에 따라 추정 (실제로는 헤더 텍스트를 확인해야 하지만, 인덱스로 추정)
+                  if (columnIndex === 0) return '40px'; // 구분
+                  if (columnIndex === 1) return '50px'; // 포지션
+                  if (columnIndex === 2) return '45px'; // 투구손/타격손
+                  if (columnIndex === 3) return '80px'; // 이름
+                  if (columnIndex >= 4 && columnIndex <= 9) return '45px'; // 능력치들
+                  if (cellText.includes('기록') || cellText.includes('Stats') || cellText.length > 15) return '120px'; // 기록
+                  if (cellText.includes('억') || cellText.includes('만')) return '50px'; // 연봉
+                  if (cellText.length > 10) return '80px'; // 비고
+                  return '60px';
+                };
+                
                 return (
                   <td 
-                    className={`border border-gray-300 px-1 sm:px-1.5 md:px-2 py-0.5 sm:py-1 md:py-1.5 text-[9px] sm:text-[10px] md:text-xs font-mono cursor-default whitespace-nowrap ${
+                    className={`border border-gray-300 px-0.5 sm:px-1 md:px-1.5 py-0.5 sm:py-1 md:py-1.5 text-[8px] sm:text-[9px] md:text-[10px] font-mono cursor-default whitespace-nowrap ${
                       isDivisionColumn 
                         ? cellText.trim() === '1군' 
                           ? 'font-bold text-baseball-green bg-green-50' 
                           : 'font-bold text-gray-600 bg-gray-50'
                         : ''
                     }`}
-                    style={{ minWidth: '60px', maxWidth: '200px', wordBreak: 'keep-all', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                    title={cellText.length > 20 ? cellText : undefined}
+                    style={{ 
+                      minWidth: getMinWidth(), 
+                      wordBreak: 'keep-all', 
+                      overflow: 'hidden', 
+                      textOverflow: 'ellipsis',
+                      paddingLeft: '2px',
+                      paddingRight: '2px'
+                    }}
+                    title={cellText.length > 15 ? cellText : undefined}
                   >
                     {children}
                   </td>
