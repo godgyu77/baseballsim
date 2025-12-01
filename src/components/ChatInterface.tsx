@@ -88,11 +88,11 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
     const userMessage = messageText.trim();
     setInput('');
     
-    // 신생 구단인 경우 구단 이름 추출 시도 (이미 설정된 경우 덮어쓰지 않음)
+    // 신생 구단인 경우 구단 이름 추출 시도 (항상 업데이트)
     if (selectedTeam.id === 'expansion') {
       const extractedTeamName = extractTeamName(userMessage);
-      if (extractedTeamName && !gameState.teamName) {
-        // 팀 이름이 아직 설정되지 않은 경우에만 설정
+      if (extractedTeamName) {
+        // 팀 이름이 추출되면 항상 업데이트
         setGameState(prev => ({ ...prev, teamName: extractedTeamName }));
       }
     }
@@ -631,11 +631,11 @@ ${difficultyConfig}
         console.log('[자금 파싱] ❌ 자금 추출 실패 또는 0원');
       }
       
-      // 팀명 추출 (AI 응답에서도 추출 시도, 이미 설정된 경우 덮어쓰지 않음)
+      // 팀명 추출 (AI 응답에서도 추출 시도, 이미 설정된 경우에도 업데이트 가능)
       if (selectedTeam.id === 'expansion') {
         const extractedTeamName = extractTeamName(lastAIMessage.text);
-        if (extractedTeamName && !gameState.teamName) {
-          // 팀 이름이 아직 설정되지 않은 경우에만 설정
+        if (extractedTeamName) {
+          // 팀 이름이 추출되면 항상 업데이트 (사용자가 새로운 이름을 입력했을 수 있음)
           setGameState(prev => ({ ...prev, teamName: extractedTeamName }));
         }
       }

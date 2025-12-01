@@ -134,28 +134,30 @@ function MessageBubble({
                 const headerText = typeof children === 'string' ? children : String(children);
                 // 컬럼별 최소 너비 설정 (짧은 컬럼은 더 작게)
                 const getMinWidth = () => {
-                  if (headerText.includes('구분')) return '40px';
-                  if (headerText.includes('포지션')) return '50px';
-                  if (headerText.includes('투구손') || headerText.includes('타격손')) return '45px';
-                  if (headerText.includes('이름')) return '80px';
-                  if (headerText.includes('구속') || headerText.includes('컨택') || headerText.includes('갭파') || headerText.includes('파워') || headerText.includes('선구') || headerText.includes('주루') || headerText.includes('수비') || headerText.includes('구위') || headerText.includes('제구') || headerText.includes('체력')) return '45px';
-                  if (headerText.includes('기록') || headerText.includes('Stats')) return '120px';
-                  if (headerText.includes('연봉')) return '50px';
-                  if (headerText.includes('비고')) return '80px';
-                  if (headerText.includes('원소속') || headerText.includes('변화구')) return '100px';
-                  return '60px';
+                  if (headerText.includes('구분')) return '35px';
+                  if (headerText.includes('포지션')) return '45px';
+                  if (headerText.includes('투구손') || headerText.includes('타격손')) return '40px';
+                  if (headerText.includes('이름')) return '70px';
+                  if (headerText.includes('구속') || headerText.includes('컨택') || headerText.includes('갭파') || headerText.includes('파워') || headerText.includes('선구') || headerText.includes('주루') || headerText.includes('수비') || headerText.includes('구위') || headerText.includes('제구') || headerText.includes('체력')) return '35px';
+                  if (headerText.includes('기록') || headerText.includes('Stats')) return '110px';
+                  if (headerText.includes('연봉')) return '45px';
+                  if (headerText.includes('비고')) return '70px';
+                  if (headerText.includes('원소속') || headerText.includes('변화구')) return '80px';
+                  return '50px';
                 };
                 
                 return (
                   <th 
-                    className="border border-gray-300 px-0.5 sm:px-1 md:px-1.5 py-0.5 sm:py-1 md:py-1.5 text-left font-semibold text-[8px] sm:text-[9px] md:text-[10px] text-white bg-baseball-green whitespace-nowrap cursor-default" 
+                    className="border border-gray-300 px-0.5 sm:px-1 md:px-1.5 py-0.5 sm:py-1 md:py-1.5 text-left font-semibold text-[7px] sm:text-[8px] md:text-[9px] text-white bg-baseball-green whitespace-nowrap cursor-default" 
                     style={{ 
                       minWidth: getMinWidth(), 
                       wordBreak: 'keep-all', 
                       overflow: 'hidden', 
                       textOverflow: 'ellipsis',
-                      paddingLeft: '2px',
-                      paddingRight: '2px'
+                      paddingLeft: '1px',
+                      paddingRight: '1px',
+                      lineHeight: '1.2',
+                      boxSizing: 'border-box'
                     }}
                   >
                     {children}
@@ -171,20 +173,24 @@ function MessageBubble({
                 // 컬럼별 최소 너비 설정 (헤더와 동일하게)
                 const getMinWidth = () => {
                   // 컬럼 인덱스에 따라 추정 (실제로는 헤더 텍스트를 확인해야 하지만, 인덱스로 추정)
-                  if (columnIndex === 0) return '40px'; // 구분
-                  if (columnIndex === 1) return '50px'; // 포지션
-                  if (columnIndex === 2) return '45px'; // 투구손/타격손
-                  if (columnIndex === 3) return '80px'; // 이름
-                  if (columnIndex >= 4 && columnIndex <= 9) return '45px'; // 능력치들
-                  if (cellText.includes('기록') || cellText.includes('Stats') || cellText.length > 15) return '120px'; // 기록
-                  if (cellText.includes('억') || cellText.includes('만')) return '50px'; // 연봉
-                  if (cellText.length > 10) return '80px'; // 비고
-                  return '60px';
+                  if (columnIndex === 0) return '35px'; // 구분
+                  if (columnIndex === 1) return '45px'; // 포지션
+                  if (columnIndex === 2) return '40px'; // 투구손/타격손
+                  if (columnIndex === 3) return '70px'; // 이름
+                  if (columnIndex >= 4 && columnIndex <= 9) return '35px'; // 능력치들
+                  if (columnIndex === 10) return '110px'; // 기록 (Stats)
+                  if (columnIndex === 11) return '45px'; // 연봉
+                  if (columnIndex === 12) return '70px'; // 비고
+                  if (columnIndex === 13) return '80px'; // 원소속 구단
+                  if (cellText.includes('기록') || cellText.includes('Stats') || cellText.length > 15) return '110px'; // 기록
+                  if (cellText.includes('억') || cellText.includes('만')) return '45px'; // 연봉
+                  if (cellText.length > 10) return '70px'; // 비고
+                  return '50px';
                 };
                 
                 return (
                   <td 
-                    className={`border border-gray-300 px-0.5 sm:px-1 md:px-1.5 py-0.5 sm:py-1 md:py-1.5 text-[8px] sm:text-[9px] md:text-[10px] font-mono cursor-default whitespace-nowrap ${
+                    className={`border border-gray-300 px-0.5 sm:px-1 md:px-1.5 py-0.5 sm:py-1 md:py-1.5 text-[7px] sm:text-[8px] md:text-[9px] font-mono cursor-default whitespace-nowrap ${
                       isDivisionColumn 
                         ? cellText.trim() === '1군' 
                           ? 'font-bold text-baseball-green bg-green-50' 
@@ -196,10 +202,12 @@ function MessageBubble({
                       wordBreak: 'keep-all', 
                       overflow: 'hidden', 
                       textOverflow: 'ellipsis',
-                      paddingLeft: '2px',
-                      paddingRight: '2px'
+                      paddingLeft: '1px',
+                      paddingRight: '1px',
+                      lineHeight: '1.2',
+                      boxSizing: 'border-box'
                     }}
-                    title={cellText.length > 15 ? cellText : undefined}
+                    title={cellText.length > 12 ? cellText : undefined}
                   >
                     {children}
                   </td>
