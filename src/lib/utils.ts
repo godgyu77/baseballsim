@@ -537,11 +537,75 @@ export function extractBudget(text: string): number | null {
 }
 
 /**
+ * 텍스트에서 연고지와 팀 이름을 함께 추출합니다 (신생 구단 창단 시 사용)
+ * @param text 사용자 입력 또는 AI 응답 텍스트
+ * @returns 추출된 전체 구단명 (연고지 + 팀 이름 또는 팀 이름만, 없으면 null)
+ */
+export function extractFullTeamName(text: string): string | null {
+  // 제외할 키워드 목록
+  const excludeKeywords = [
+    '당신의', '새로운', '노말', '이지', '헬', '모드', '난이도', 'difficulty',
+    '선택', '설정', '적용', '변경', '금지', '절대', '시즌', 'season',
+    '구단', '팀', '야구단', 'city', 'team', 'name'
+  ];
+  
+  // 패턴 1: "연고지: 제주시, 팀이름: 한라 감귤스" 형식 → "한라 감귤스" (팀 이름만)
+  const pattern1 = /(?:연고지|연고)[:\s]*([가-힣a-zA-Z0-9\s]+?)(?:[,\s]+팀이름|팀\s*이름)[:\s]*([가-힣a-zA-Z0-9\s]+?)(?:입니다|이다|\.|$|,)/i;
+  const match1 = text.match(pattern1);
+  if (match1 && match1[1] && match1[2]) {
+    const city = match1[1].trim();
+    const teamName = match1[2].trim();
+    // 제외 키워드 체크
+    if (!excludeKeywords.some(k => city.includes(k) || teamName.includes(k))) {
+      if (city.length >= 2 && teamName.length >= 2) {
+        // 연고지와 팀 이름이 명시적으로 구분된 경우 → 팀 이름만 반환
+        return teamName;
+      }
+    }
+  }
+  
+  // 패턴 2: "연고지는 제주시이고, 팀 이름은 한라 감귤스입니다" 형식 → "한라 감귤스" (팀 이름만)
+  const pattern2 = /(?:연고지|연고)[은는]\s*([가-힣a-zA-Z0-9\s]+?)(?:이고|이고,|이고\s*팀|이고\s*구단).*?(?:팀|구단)\s*이름[은는]\s*([가-힣a-zA-Z0-9\s]+?)(?:입니다|이다|\.|$)/i;
+  const match2 = text.match(pattern2);
+  if (match2 && match2[1] && match2[2]) {
+    const city = match2[1].trim();
+    const teamName = match2[2].trim();
+    if (!excludeKeywords.some(k => city.includes(k) || teamName.includes(k))) {
+      if (city.length >= 2 && teamName.length >= 2) {
+        // 연고지와 팀 이름이 명시적으로 구분된 경우 → 팀 이름만 반환
+        return teamName;
+      }
+    }
+  }
+  
+  // 패턴 3: "제주시 한라 감귤스" 형식 (연고지 + 팀 이름이 공백으로 구분) → "제주시 한라 감귤스" (전체)
+  const pattern3 = /([가-힣]+(?:시|도|특별시|광역시|특별자치시))\s+([가-힣a-zA-Z0-9\s]+?)(?:\s|$|입니다|이다|\.|로|으로)/i;
+  const match3 = text.match(pattern3);
+  if (match3 && match3[1] && match3[2]) {
+    const city = match3[1].trim();
+    const teamName = match3[2].trim();
+    if (!excludeKeywords.some(k => city.includes(k) || teamName.includes(k))) {
+      if (city.length >= 2 && teamName.length >= 2 && teamName.length <= 30) {
+        // 연고지와 팀 이름이 공백으로 구분된 경우 → 전체 반환
+        return `${city} ${teamName}`;
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
  * 텍스트에서 구단 이름을 추출합니다 (신생 구단 창단 시 사용)
  * @param text 사용자 입력 또는 AI 응답 텍스트
  * @returns 추출된 구단 이름 (없으면 null)
  */
 export function extractTeamName(text: string): string | null {
+  // 먼저 전체 구단명(연고지 + 팀 이름) 추출 시도
+  const fullName = extractFullTeamName(text);
+  if (fullName) {
+    return fullName;
+  }
   // 제외할 키워드 목록 (이런 단어가 포함된 텍스트는 팀 이름으로 추출하지 않음)
   const excludeKeywords = [
     '당신의', '새로운', '노말', '이지', '헬', '모드', '난이도', 'difficulty',

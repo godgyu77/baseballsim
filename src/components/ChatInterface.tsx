@@ -639,6 +639,16 @@ ${difficultyConfig}
           setGameState(prev => ({ ...prev, teamName: extractedTeamName }));
         }
       }
+      
+      // 사용자 메시지에서도 팀명 추출 시도
+      const userMessages = messages.filter(m => m.isUser);
+      if (selectedTeam.id === 'expansion' && userMessages.length > 0) {
+        const lastUserMessage = userMessages[userMessages.length - 1];
+        const extractedTeamName = extractTeamName(lastUserMessage.text);
+        if (extractedTeamName) {
+          setGameState(prev => ({ ...prev, teamName: extractedTeamName }));
+        }
+      }
     }
   }, [messages, selectedTeam.id]);
   
@@ -1000,7 +1010,7 @@ ${difficultyConfig}
       <GameHeader 
         teamName={
           selectedTeam.id === 'expansion' 
-            ? (gameState.teamName || '신생구단')
+            ? (gameState.teamName || '미정')
             : (gameState.teamName || selectedTeam.fullName)
         }
         budget={gameState.budget}

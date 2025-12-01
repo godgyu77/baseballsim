@@ -67,7 +67,7 @@ function MessageBubble({
         </div>
 
         {/* 게임스러운 본문 */}
-        <div className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 text-sm sm:text-base md:text-lg text-gray-800 bg-white/50">
+        <div className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 text-sm sm:text-base md:text-lg text-gray-800 bg-white/50" style={{ fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif' }}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
