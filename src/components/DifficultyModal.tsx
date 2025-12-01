@@ -73,6 +73,10 @@ export default function DifficultyModal({ isOpen, onSelect }: DifficultyModalPro
                       </li>
                       <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-green-600 mt-0.5">•</span>
+                        <span>아시아 쿼터 샐러리캡: <strong className="text-green-800">무제한</strong></span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-green-600 mt-0.5">•</span>
                         <span>수입 <strong className="text-green-800">1.5배</strong> 보너스</span>
                       </li>
                       <li className="flex items-start gap-1.5 sm:gap-2">
@@ -113,6 +117,10 @@ export default function DifficultyModal({ isOpen, onSelect }: DifficultyModalPro
                       </li>
                       <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-blue-600 mt-0.5">•</span>
+                        <span>아시아 쿼터 샐러리캡: <strong className="text-blue-800">3.0억 원</strong></span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-blue-600 mt-0.5">•</span>
                         <span>수입 보너스 없음</span>
                       </li>
                       <li className="flex items-start gap-1.5 sm:gap-2">
@@ -150,6 +158,10 @@ export default function DifficultyModal({ isOpen, onSelect }: DifficultyModalPro
                       <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-red-600 mt-0.5">•</span>
                         <span>용병 샐러리캡: <strong className="text-red-800">40억 원</strong></span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-red-600 mt-0.5">•</span>
+                        <span>아시아 쿼터 샐러리캡: <strong className="text-red-800">2.0억 원</strong></span>
                       </li>
                       <li className="flex items-start gap-1.5 sm:gap-2">
                         <span className="text-red-600 mt-0.5">•</span>
