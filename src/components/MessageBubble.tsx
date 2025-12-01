@@ -94,9 +94,9 @@ function MessageBubble({
               ),
               // 표 스타일링 (컴팩트, 고정 헤더, 반응형, 절대 깨짐 방지)
               table: ({ children }: any) => (
-                <div className="w-full overflow-x-auto my-3 -mx-2 sm:-mx-4 px-2 sm:px-4 touch-pan-x" style={{ WebkitOverflowScrolling: 'touch' }}>
-                  <div className="inline-block min-w-full align-middle">
-                    <table className="w-full border-collapse bg-white text-[9px] sm:text-[10px] md:text-xs whitespace-nowrap" style={{ minWidth: '100%', width: '100%', tableLayout: 'auto' }}>
+                <div className="w-full overflow-x-auto my-3 -mx-2 sm:-mx-4 px-2 sm:px-4 touch-pan-x" style={{ WebkitOverflowScrolling: 'touch', maxWidth: '100%', overflowX: 'auto', overflowY: 'visible' }}>
+                  <div className="inline-block min-w-full align-middle" style={{ minWidth: 'max-content', display: 'inline-block' }}>
+                    <table className="border-collapse bg-white text-[9px] sm:text-[10px] md:text-xs whitespace-nowrap" style={{ tableLayout: 'auto', minWidth: 'max-content', width: 'auto', borderCollapse: 'collapse' }}>
                       {children}
                     </table>
                   </div>
@@ -130,7 +130,7 @@ function MessageBubble({
                 );
               },
               th: ({ children }: any) => (
-                <th className="border border-gray-300 px-1 sm:px-1.5 md:px-2 py-0.5 sm:py-1 md:py-1.5 text-left font-semibold text-[9px] sm:text-[10px] md:text-xs text-white bg-baseball-green whitespace-nowrap cursor-default" style={{ minWidth: '50px', wordBreak: 'keep-all' }}>
+                <th className="border border-gray-300 px-1 sm:px-1.5 md:px-2 py-0.5 sm:py-1 md:py-1.5 text-left font-semibold text-[9px] sm:text-[10px] md:text-xs text-white bg-baseball-green whitespace-nowrap cursor-default" style={{ minWidth: '60px', maxWidth: '200px', wordBreak: 'keep-all', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {children}
                 </th>
               ),
@@ -149,7 +149,8 @@ function MessageBubble({
                           : 'font-bold text-gray-600 bg-gray-50'
                         : ''
                     }`}
-                    style={{ minWidth: '50px', wordBreak: 'keep-all' }}
+                    style={{ minWidth: '60px', maxWidth: '200px', wordBreak: 'keep-all', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                    title={cellText.length > 20 ? cellText : undefined}
                   >
                     {children}
                   </td>

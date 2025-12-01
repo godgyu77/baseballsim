@@ -114,3 +114,45 @@ button, a {
   }
 }
 
+/* 표 절대 깨짐 방지 스타일 */
+table {
+  border-collapse: collapse !important;
+  table-layout: auto !important;
+  width: 100% !important;
+  min-width: 100% !important;
+}
+
+table th,
+table td {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  word-break: keep-all !important;
+  min-width: 60px !important;
+  max-width: 200px !important;
+  padding: 0.25rem 0.5rem !important;
+}
+
+/* 표 컨테이너 - 가로 스크롤 보장 */
+div[class*="overflow-x-auto"] {
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* 모바일에서 표 최적화 */
+@media (max-width: 768px) {
+  table {
+    font-size: 9px !important;
+  }
+  
+  table th,
+  table td {
+    padding: 0.125rem 0.25rem !important;
+    font-size: 9px !important;
+    min-width: 50px !important;
+    max-width: 150px !important;
+  }
+}
+
