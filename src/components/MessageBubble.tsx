@@ -67,7 +67,7 @@ function MessageBubble({
         </div>
 
         {/* 게임스러운 본문 */}
-        <div className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 text-xs sm:text-sm text-gray-800 bg-white/50">
+        <div className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 text-sm sm:text-base md:text-lg text-gray-800 bg-white/50">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -133,7 +133,7 @@ function MessageBubble({
                       }}
                     >
                       <table 
-                        className={`border-collapse bg-white text-[8px] sm:text-[9px] md:text-[10px] whitespace-nowrap ${isBatterTable ? 'batter-table' : ''}`}
+                        className={`border-collapse bg-white text-xs sm:text-sm md:text-base whitespace-nowrap ${isBatterTable ? 'batter-table' : ''}`}
                         style={{ 
                           tableLayout: isBatterTable ? 'fixed' : 'auto', 
                           minWidth: 'max-content', 
@@ -226,7 +226,7 @@ function MessageBubble({
                 
                 return (
                   <th 
-                    className={`border border-gray-300 px-0.5 sm:px-1 md:px-1.5 py-0.5 sm:py-1 md:py-1.5 text-left font-semibold text-[7px] sm:text-[8px] md:text-[9px] text-white bg-baseball-green whitespace-nowrap cursor-default ${isBatterTable ? 'batter-table-cell' : ''}`}
+                    className={`border border-gray-300 px-1 sm:px-2 md:px-3 py-1 sm:py-2 md:py-2.5 text-left font-semibold text-xs sm:text-sm md:text-base text-white bg-baseball-green whitespace-nowrap cursor-default ${isBatterTable ? 'batter-table-cell' : ''}`}
                     style={{ 
                       ...(minWidth ? { minWidth } : {}),
                       wordBreak: 'keep-all', 
@@ -277,7 +277,7 @@ function MessageBubble({
                 
                 return (
                   <td 
-                    className={`border border-gray-300 px-0.5 sm:px-1 md:px-1.5 py-0.5 sm:py-1 md:py-1.5 text-[7px] sm:text-[8px] md:text-[9px] font-mono cursor-default whitespace-nowrap ${
+                    className={`border border-gray-300 px-1 sm:px-2 md:px-3 py-1 sm:py-2 md:py-2.5 text-xs sm:text-sm md:text-base font-mono cursor-default whitespace-nowrap ${
                       isDivisionColumn 
                         ? cellText.trim() === '1군' 
                           ? 'font-bold text-baseball-green bg-green-50' 
@@ -302,13 +302,13 @@ function MessageBubble({
               },
               // 일반 텍스트 스타일
               p: ({ children }) => (
-                <p className="mb-2 last:mb-0 whitespace-pre-wrap leading-relaxed text-gray-800 break-words">
+                <p className="mb-3 last:mb-0 whitespace-pre-wrap leading-relaxed text-gray-800 break-words text-sm sm:text-base md:text-lg">
                   {children}
                 </p>
               ),
               // 코드 블록
               pre: ({ children }) => (
-                <pre className="bg-gray-50 p-2 sm:p-3 rounded text-[10px] sm:text-xs font-mono overflow-x-auto my-2 border border-gray-200 touch-pan-x">
+                <pre className="bg-gray-50 p-3 sm:p-4 rounded text-sm sm:text-base font-mono overflow-x-auto my-3 border border-gray-200 touch-pan-x">
                   {children}
                 </pre>
               ),
@@ -316,7 +316,7 @@ function MessageBubble({
               code: ({ children, className }) => {
                 const isInline = !className;
                 return isInline ? (
-                  <code className="bg-gray-100 px-1 py-0.5 rounded text-[10px] sm:text-xs font-mono text-baseball-green break-all">
+                  <code className="bg-gray-100 px-2 py-1 rounded text-sm sm:text-base font-mono text-baseball-green break-all">
                     {children}
                   </code>
                 ) : (
@@ -325,12 +325,12 @@ function MessageBubble({
               },
               // 리스트
               ul: ({ children }) => (
-                <ul className="list-disc list-inside my-2 space-y-1 text-gray-700">
+                <ul className="list-disc list-inside my-3 space-y-2 text-gray-700 text-sm sm:text-base md:text-lg">
                   {children}
                 </ul>
               ),
               ol: ({ children }) => (
-                <ol className="list-decimal list-inside my-2 space-y-1 text-gray-700">
+                <ol className="list-decimal list-inside my-3 space-y-2 text-gray-700 text-sm sm:text-base md:text-lg">
                   {children}
                 </ol>
               ),

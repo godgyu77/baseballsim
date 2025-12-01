@@ -1000,7 +1000,7 @@ ${difficultyConfig}
       <GameHeader 
         teamName={
           selectedTeam.id === 'expansion' 
-            ? (gameState.teamName || '신규구단')
+            ? (gameState.teamName || '신생구단')
             : (gameState.teamName || selectedTeam.fullName)
         }
         budget={gameState.budget}
