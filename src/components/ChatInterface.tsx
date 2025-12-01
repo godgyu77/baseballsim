@@ -369,6 +369,10 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, onRese
                   const restoredGameState = {
                     ...parsed.gameState,
                     difficulty: parsed.gameState.difficulty || difficulty, // 저장된 난이도가 없으면 현재 난이도 사용
+                    // teamName이 빈 문자열이거나 유효하지 않으면 undefined로 설정
+                    teamName: parsed.gameState.teamName && parsed.gameState.teamName.trim() !== '' 
+                      ? parsed.gameState.teamName 
+                      : undefined,
                   };
                   setGameState(restoredGameState);
                 }
@@ -1010,7 +1014,7 @@ ${difficultyConfig}
       <GameHeader 
         teamName={
           selectedTeam.id === 'expansion' 
-            ? (gameState.teamName || '미정')
+            ? (gameState.teamName && gameState.teamName.trim() !== '' ? gameState.teamName : '미정')
             : (gameState.teamName || selectedTeam.fullName)
         }
         budget={gameState.budget}

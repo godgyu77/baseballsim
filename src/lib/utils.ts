@@ -578,15 +578,20 @@ export function extractFullTeamName(text: string): string | null {
     }
   }
   
-  // 패턴 3: "제주시 한라 감귤스" 형식 (연고지 + 팀 이름이 공백으로 구분) → "제주시 한라 감귤스" (전체)
-  const pattern3 = /([가-힣]+(?:시|도|특별시|광역시|특별자치시))\s+([가-힣a-zA-Z0-9\s]+?)(?:\s|$|입니다|이다|\.|로|으로)/i;
+  // 패턴 3: "제주시 한라 감귤스" 형식 (연고지 + 팀 이름이 공백으로 구분)
+  // 도시명(시/도로 끝나는 부분) 뒤의 모든 것이 팀명
+  // 예: "제주시 한라 감귤스" → 도시: "제주시", 팀명: "한라 감귤스" → 표시: "제주시 한라 감귤스" (전체)
+  // 이 패턴은 문장 어디에나 나타날 수 있으므로 더 넓은 범위로 매칭
+  const pattern3 = /([가-힣]+(?:시|도|특별시|광역시|특별자치시))\s+([가-힣a-zA-Z0-9\s]+?)(?:\s|$|입니다|이다|\.|로|으로|로\s*결정|으로\s*결정|로\s*정했습니다|으로\s*정했습니다|로\s*설정|으로\s*설정)/i;
   const match3 = text.match(pattern3);
   if (match3 && match3[1] && match3[2]) {
     const city = match3[1].trim();
     const teamName = match3[2].trim();
+    // 제외 키워드 체크
     if (!excludeKeywords.some(k => city.includes(k) || teamName.includes(k))) {
       if (city.length >= 2 && teamName.length >= 2 && teamName.length <= 30) {
-        // 연고지와 팀 이름이 공백으로 구분된 경우 → 전체 반환
+        // 연고지와 팀 이름이 공백으로 구분된 경우 → 전체 반환 (도시명 + 팀명)
+        // 예: "제주시 한라 감귤스" → "제주시 한라 감귤스"
         return `${city} ${teamName}`;
       }
     }
@@ -606,6 +611,7 @@ export function extractTeamName(text: string): string | null {
   if (fullName) {
     return fullName;
   }
+  
   // 제외할 키워드 목록 (이런 단어가 포함된 텍스트는 팀 이름으로 추출하지 않음)
   const excludeKeywords = [
     '당신의', '새로운', '노말', '이지', '헬', '모드', '난이도', 'difficulty',
@@ -633,13 +639,27 @@ export function extractTeamName(text: string): string | null {
     /([가-힣a-zA-Z0-9\s]+?)\s*(?:로|으로)\s*(?:정했습니다|결정했습니다|설정했습니다)/i,
     // "구단명은 제주 감귤스입니다", "팀명은 제주 감귤스입니다"
     /(?:구단명|팀명)[은는:\s]+([가-힣a-zA-Z0-9\s]+?)(?:입니다|이다|\.|$)/i,
-    // "제주시 한라감귤봉" 같은 형식 - 연고지와 팀 이름이 공백으로 구분된 경우 (뒤의 부분이 팀 이름)
-    /(?:[가-힣]+시|[가-힣]+도)\s+([가-힣a-zA-Z0-9\s]+?)(?:\s|$|입니다|이다|\.)/i,
   ];
 
   for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
+      // 패턴이 도시명과 팀명을 모두 캡처하는 경우 (match[2]가 있는 경우)
+      if (match[2]) {
+        const city = match[1].trim();
+        const teamName = match[2].trim();
+        // 제외 키워드 체크
+        if (!excludeKeywords.some(k => city.includes(k) || teamName.includes(k))) {
+          if (city.length >= 2 && teamName.length >= 2 && teamName.length <= 30) {
+            // 도시명 + 팀명 전체 반환
+            return `${city} ${teamName}`;
+          }
+        }
+        // 매칭은 되었지만 유효하지 않은 경우 다음 패턴 시도
+        continue;
+      }
+      
+      // 일반적인 경우 (팀 이름만 추출)
       const teamName = match[1].trim();
       
       // 제외 키워드 체크

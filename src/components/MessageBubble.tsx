@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { FileText, Sparkles } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -17,7 +17,8 @@ function MessageBubble({
   isUser, 
   isStreaming
 }: MessageBubbleProps) {
-  const parsed = parseAIResponse(message);
+  // 파싱된 메시지를 메모이제이션하여 불필요한 재파싱 방지
+  const parsed = useMemo(() => parseAIResponse(message), [message]);
 
   // 사용자 메시지는 최소화된 로그 형태로 표시
   if (isUser) {
@@ -25,7 +26,7 @@ function MessageBubble({
       <motion.div
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.3 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
         className="mb-3 flex justify-end"
       >
         <div className="bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 border-2 border-baseball-green/30 rounded-lg px-4 py-2 text-xs text-gray-700 font-mono shadow-sm hover:shadow-md transition-all hover:border-baseball-green/50">
@@ -40,7 +41,7 @@ function MessageBubble({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: "easeOut" }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
       className="mb-4"
     >
       <div className="bg-gradient-to-br from-white to-gray-50/50 border-2 border-baseball-green/20 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 hover:border-baseball-green/40 hover:-translate-y-1 overflow-hidden">
@@ -70,7 +71,7 @@ function MessageBubble({
         <div className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 text-sm sm:text-base md:text-lg text-gray-800 bg-white/50" style={{ fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif' }}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
-            components={{
+            components={useMemo(() => ({
               // 제목 스타일링 (H1, H2, H3 구분)
               h1: ({ children }: any) => (
                 <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-baseball-green mb-3 mt-4 pt-2 border-b-2 border-baseball-green/30 pb-2 first:mt-0">
@@ -340,7 +341,7 @@ function MessageBubble({
                   {children}
                 </strong>
               ),
-            }}
+            }), [])}
           >
             {parsed.text}
           </ReactMarkdown>
