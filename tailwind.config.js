@@ -14,6 +14,9 @@ export default {
         'baseball-gold-dark': '#A0854A',
         'baseball-gold-light': '#D4B570',
       },
+      fontFamily: {
+        sans: ['Pretendard', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'sans-serif'],
+      },
     },
   },
   plugins: [],
