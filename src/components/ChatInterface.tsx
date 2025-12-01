@@ -89,14 +89,8 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     const userMessage = messageText.trim();
     setInput('');
     
-    // 신생 구단인 경우 구단 이름 추출 시도 (항상 업데이트)
-    if (selectedTeam.id === 'expansion') {
-      const extractedTeamName = extractTeamName(userMessage);
-      if (extractedTeamName) {
-        // 팀 이름이 추출되면 항상 업데이트
-        setGameState(prev => ({ ...prev, teamName: extractedTeamName }));
-      }
-    }
+    // 신생 구단인 경우 구단 이름은 expansionTeamData에서 받은 값으로 고정 (절대 변경하지 않음)
+    // AI 응답이나 사용자 메시지에서 구단명을 추출해도 업데이트하지 않음
     
     // 사용자 메시지를 먼저 추가
     setMessages((prev) => [...prev, { text: userMessage, isUser: true }]);
@@ -649,24 +643,8 @@ ${difficultyConfig}
         console.log('[자금 파싱] ❌ 자금 추출 실패 또는 0원');
       }
       
-      // 팀명 추출 (AI 응답에서도 추출 시도, 이미 설정된 경우에도 업데이트 가능)
-      if (selectedTeam.id === 'expansion') {
-        const extractedTeamName = extractTeamName(lastAIMessage.text);
-        if (extractedTeamName) {
-          // 팀 이름이 추출되면 항상 업데이트 (사용자가 새로운 이름을 입력했을 수 있음)
-          setGameState(prev => ({ ...prev, teamName: extractedTeamName }));
-        }
-      }
-      
-      // 사용자 메시지에서도 팀명 추출 시도
-      const userMessages = messages.filter(m => m.isUser);
-      if (selectedTeam.id === 'expansion' && userMessages.length > 0) {
-        const lastUserMessage = userMessages[userMessages.length - 1];
-        const extractedTeamName = extractTeamName(lastUserMessage.text);
-        if (extractedTeamName) {
-          setGameState(prev => ({ ...prev, teamName: extractedTeamName }));
-        }
-      }
+      // 신생 구단인 경우 구단명은 expansionTeamData에서 받은 값으로 고정 (절대 변경하지 않음)
+      // AI 응답이나 사용자 메시지에서 구단명을 추출해도 업데이트하지 않음
     }
   }, [messages, selectedTeam.id]);
   
@@ -1028,7 +1006,7 @@ ${difficultyConfig}
       <GameHeader 
         teamName={
           selectedTeam.id === 'expansion' 
-            ? (gameState.teamName && gameState.teamName.trim() !== '' ? gameState.teamName : '미정')
+            ? (expansionTeamData?.teamName ? `${expansionTeamData.city} ${expansionTeamData.teamName}` : selectedTeam.fullName)
             : (gameState.teamName || selectedTeam.fullName)
         }
         budget={gameState.budget}

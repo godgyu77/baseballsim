@@ -241,6 +241,14 @@ div[class*="overflow-x-auto"] > div {
   max-width: 80px !important;
 }
 
+/* 타자 표 14번째 컬럼 (원소속 구단) */
+.batter-table th:nth-child(14),
+.batter-table td:nth-child(14) {
+  width: 80px !important;
+  min-width: 80px !important;
+  max-width: 80px !important;
+}
+
 /* 모바일에서 표 최적화 */
 @media (max-width: 768px) {
   table {
@@ -326,6 +334,13 @@ div[class*="overflow-x-auto"] > div {
   
   .batter-table th:nth-child(13),
   .batter-table td:nth-child(13) {
+    width: 70px !important;
+    min-width: 70px !important;
+    max-width: 70px !important;
+  }
+  
+  .batter-table th:nth-child(14),
+  .batter-table td:nth-child(14) {
     width: 70px !important;
     min-width: 70px !important;
     max-width: 70px !important;

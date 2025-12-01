@@ -136,9 +136,9 @@ function MessageBubble({
                       <table 
                         className={`border-collapse bg-white text-xs sm:text-sm md:text-base whitespace-nowrap ${isBatterTable ? 'batter-table' : ''}`}
                         style={{ 
-                          tableLayout: 'auto', 
+                          tableLayout: isBatterTable ? 'fixed' : 'auto', 
                           minWidth: 'max-content', 
-                          width: 'max-content', 
+                          width: isBatterTable ? '100%' : 'max-content', 
                           borderCollapse: 'collapse', 
                           display: 'table',
                           borderSpacing: '0'
