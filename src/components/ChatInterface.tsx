@@ -1006,7 +1006,7 @@ ${difficultyConfig}
       <GameHeader 
         teamName={
           selectedTeam.id === 'expansion' 
-            ? (expansionTeamData?.teamName ? `${expansionTeamData.city} ${expansionTeamData.teamName}` : selectedTeam.fullName)
+            ? (expansionTeamData?.teamName || selectedTeam.fullName)
             : (gameState.teamName || selectedTeam.fullName)
         }
         budget={gameState.budget}
