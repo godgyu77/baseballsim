@@ -154,6 +154,95 @@ div[class*="overflow-x-auto"] > div {
   vertical-align: top !important;
 }
 
+/* 타자 표 전용 스타일 - 절대 깨짐 방지 */
+.batter-table-container {
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+.batter-table {
+  table-layout: fixed !important;
+  width: auto !important;
+  min-width: max-content !important;
+}
+
+.batter-table th,
+.batter-table td,
+.batter-table-cell {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  word-break: keep-all !important;
+  box-sizing: border-box !important;
+  border: 1px solid #d1d5db !important;
+  vertical-align: middle !important;
+}
+
+/* 타자 표 컬럼별 고정 너비 */
+.batter-table th:nth-child(1),
+.batter-table td:nth-child(1) {
+  width: 35px !important;
+  min-width: 35px !important;
+  max-width: 35px !important;
+}
+
+.batter-table th:nth-child(2),
+.batter-table td:nth-child(2) {
+  width: 45px !important;
+  min-width: 45px !important;
+  max-width: 45px !important;
+}
+
+.batter-table th:nth-child(3),
+.batter-table td:nth-child(3) {
+  width: 40px !important;
+  min-width: 40px !important;
+  max-width: 40px !important;
+}
+
+.batter-table th:nth-child(4),
+.batter-table td:nth-child(4) {
+  width: 70px !important;
+  min-width: 70px !important;
+  max-width: 70px !important;
+}
+
+.batter-table th:nth-child(n+5):nth-child(-n+9),
+.batter-table td:nth-child(n+5):nth-child(-n+9) {
+  width: 35px !important;
+  min-width: 35px !important;
+  max-width: 35px !important;
+}
+
+.batter-table th:nth-child(10),
+.batter-table td:nth-child(10) {
+  width: 110px !important;
+  min-width: 110px !important;
+  max-width: 110px !important;
+}
+
+.batter-table th:nth-child(11),
+.batter-table td:nth-child(11) {
+  width: 45px !important;
+  min-width: 45px !important;
+  max-width: 45px !important;
+}
+
+.batter-table th:nth-child(12),
+.batter-table td:nth-child(12) {
+  width: 70px !important;
+  min-width: 70px !important;
+  max-width: 70px !important;
+}
+
+.batter-table th:nth-child(13),
+.batter-table td:nth-child(13) {
+  width: 80px !important;
+  min-width: 80px !important;
+  max-width: 80px !important;
+}
+
 /* 모바일에서 표 최적화 */
 @media (max-width: 768px) {
   table {
@@ -168,19 +257,80 @@ div[class*="overflow-x-auto"] > div {
     line-height: 1.2 !important;
   }
   
-  /* 타자진 표는 컬럼이 많으므로 더 작은 폰트와 패딩 */
-  table th:nth-child(n+4),
-  table td:nth-child(n+4) {
+  /* 타자 표 모바일 최적화 */
+  .batter-table {
     font-size: 6px !important;
+  }
+  
+  .batter-table th,
+  .batter-table td {
     padding: 1px !important;
+    font-size: 6px !important;
     line-height: 1.1 !important;
   }
   
-  /* 기록(Stats) 컬럼은 더 넓게 */
-  table th:nth-child(10),
-  table td:nth-child(10) {
-    min-width: 100px !important;
-    max-width: 150px !important;
+  /* 타자 표 컬럼 너비 모바일 조정 */
+  .batter-table th:nth-child(1),
+  .batter-table td:nth-child(1) {
+    width: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+  }
+  
+  .batter-table th:nth-child(2),
+  .batter-table td:nth-child(2) {
+    width: 40px !important;
+    min-width: 40px !important;
+    max-width: 40px !important;
+  }
+  
+  .batter-table th:nth-child(3),
+  .batter-table td:nth-child(3) {
+    width: 35px !important;
+    min-width: 35px !important;
+    max-width: 35px !important;
+  }
+  
+  .batter-table th:nth-child(4),
+  .batter-table td:nth-child(4) {
+    width: 60px !important;
+    min-width: 60px !important;
+    max-width: 60px !important;
+  }
+  
+  .batter-table th:nth-child(n+5):nth-child(-n+9),
+  .batter-table td:nth-child(n+5):nth-child(-n+9) {
+    width: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+  }
+  
+  .batter-table th:nth-child(10),
+  .batter-table td:nth-child(10) {
+    width: 90px !important;
+    min-width: 90px !important;
+    max-width: 90px !important;
+  }
+  
+  .batter-table th:nth-child(11),
+  .batter-table td:nth-child(11) {
+    width: 40px !important;
+    min-width: 40px !important;
+    max-width: 40px !important;
+  }
+  
+  .batter-table th:nth-child(12),
+  .batter-table td:nth-child(12) {
+    width: 60px !important;
+    min-width: 60px !important;
+    max-width: 60px !important;
+  }
+  
+  .batter-table th:nth-child(13),
+  .batter-table td:nth-child(13) {
+    width: 70px !important;
+    min-width: 70px !important;
+    max-width: 70px !important;
   }
 }
 

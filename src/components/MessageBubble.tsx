@@ -93,35 +93,105 @@ function MessageBubble({
                 </h4>
               ),
               // 표 스타일링 (컴팩트, 고정 헤더, 반응형, 절대 깨짐 방지)
-              table: ({ children }: any) => (
-                <div className="w-full overflow-x-auto my-3 -mx-2 sm:-mx-4 px-2 sm:px-4 touch-pan-x" style={{ WebkitOverflowScrolling: 'touch', maxWidth: '100%', overflowX: 'auto', overflowY: 'visible', display: 'block' }}>
-                  <div className="inline-block min-w-full align-middle" style={{ minWidth: 'max-content', display: 'inline-block', width: 'max-content' }}>
-                    <table className="border-collapse bg-white text-[8px] sm:text-[9px] md:text-[10px] whitespace-nowrap" style={{ tableLayout: 'auto', minWidth: 'max-content', width: 'max-content', borderCollapse: 'collapse', display: 'table' }}>
-                      {children}
-                    </table>
+              table: ({ children }: any) => {
+                // 타자 표인지 확인 (thead의 th 개수로 판단)
+                const thead = React.Children.toArray(children).find((child: any) => 
+                  React.isValidElement(child) && child.type === 'thead'
+                );
+                let isBatterTable = false;
+                if (thead && React.isValidElement(thead)) {
+                  const theadChildren = React.Children.toArray((thead as any).props.children);
+                  const firstRow = theadChildren.find((child: any) => 
+                    React.isValidElement(child) && child.type === 'tr'
+                  );
+                  if (firstRow && React.isValidElement(firstRow)) {
+                    const thCount = React.Children.count((firstRow as any).props.children);
+                    // 타자 표는 보통 13-14개 컬럼 (투수는 12개 정도)
+                    isBatterTable = thCount >= 13;
+                  }
+                }
+                
+                return (
+                  <div 
+                    className={`w-full overflow-x-auto my-3 -mx-2 sm:-mx-4 px-2 sm:px-4 touch-pan-x ${isBatterTable ? 'batter-table-container' : ''}`}
+                    style={{ 
+                      WebkitOverflowScrolling: 'touch', 
+                      maxWidth: '100%', 
+                      overflowX: 'auto', 
+                      overflowY: 'visible', 
+                      display: 'block',
+                      position: 'relative'
+                    }}
+                  >
+                    <div 
+                      className="inline-block min-w-full align-middle" 
+                      style={{ 
+                        minWidth: 'max-content', 
+                        display: 'inline-block', 
+                        width: 'max-content',
+                        verticalAlign: 'top'
+                      }}
+                    >
+                      <table 
+                        className={`border-collapse bg-white text-[8px] sm:text-[9px] md:text-[10px] whitespace-nowrap ${isBatterTable ? 'batter-table' : ''}`}
+                        style={{ 
+                          tableLayout: isBatterTable ? 'fixed' : 'auto', 
+                          minWidth: 'max-content', 
+                          width: isBatterTable ? 'auto' : 'max-content', 
+                          borderCollapse: 'collapse', 
+                          display: 'table',
+                          borderSpacing: '0'
+                        }}
+                        data-batter-table={isBatterTable}
+                      >
+                        {React.Children.map(React.Children.toArray(children), (child: any) => {
+                          if (React.isValidElement(child)) {
+                            return React.cloneElement(child as any, { 
+                              'data-batter-table': isBatterTable
+                            });
+                          }
+                          return child;
+                        })}
+                      </table>
+                    </div>
                   </div>
-                </div>
-              ),
-              thead: ({ children }: any) => (
-                <thead className="bg-baseball-green text-white sticky top-0 z-10">
-                  {children}
-                </thead>
-              ),
+                );
+              },
+              thead: ({ children, ...props }: any) => {
+                const isBatterTable = props['data-batter-table'] === true;
+                return (
+                  <thead 
+                    className="bg-baseball-green text-white sticky top-0 z-10"
+                    data-batter-table={isBatterTable}
+                  >
+                    {React.Children.map(React.Children.toArray(children), (child: any) => {
+                      if (React.isValidElement(child)) {
+                        return React.cloneElement(child as any, { 
+                          'data-batter-table': isBatterTable
+                        });
+                      }
+                      return child;
+                    })}
+                  </thead>
+                );
+              },
               tbody: ({ children }: any) => (
                 <tbody className="divide-y divide-gray-200 bg-white">
                   {children}
                 </tbody>
               ),
-              tr: ({ children }: any) => {
+              tr: ({ children, ...props }: any) => {
                 // tr의 자식들을 배열로 변환하여 인덱스 추적
                 const childrenArray = React.Children.toArray(children);
+                const isBatterTable = props['data-batter-table'] === true;
                 
                 return (
                   <tr className="hover:bg-green-50 transition-colors cursor-default">
                     {React.Children.map(childrenArray, (child, index) => {
                       if (React.isValidElement(child)) {
                         return React.cloneElement(child as any, { 
-                          'data-column-index': index 
+                          'data-column-index': index,
+                          'data-batter-table': isBatterTable
                         });
                       }
                       return child;
@@ -132,8 +202,14 @@ function MessageBubble({
               th: ({ children, ...props }: any) => {
                 const columnIndex = props['data-column-index'] ?? -1;
                 const headerText = typeof children === 'string' ? children : String(children);
+                const isBatterTable = props['data-batter-table'] === true;
+                
                 // 컬럼별 최소 너비 설정 (짧은 컬럼은 더 작게)
                 const getMinWidth = () => {
+                  if (isBatterTable) {
+                    // 타자 표는 고정 너비 사용 (CSS에서 처리)
+                    return undefined;
+                  }
                   if (headerText.includes('구분')) return '35px';
                   if (headerText.includes('포지션')) return '45px';
                   if (headerText.includes('투구손') || headerText.includes('타격손')) return '40px';
@@ -146,11 +222,13 @@ function MessageBubble({
                   return '50px';
                 };
                 
+                const minWidth = getMinWidth();
+                
                 return (
                   <th 
-                    className="border border-gray-300 px-0.5 sm:px-1 md:px-1.5 py-0.5 sm:py-1 md:py-1.5 text-left font-semibold text-[7px] sm:text-[8px] md:text-[9px] text-white bg-baseball-green whitespace-nowrap cursor-default" 
+                    className={`border border-gray-300 px-0.5 sm:px-1 md:px-1.5 py-0.5 sm:py-1 md:py-1.5 text-left font-semibold text-[7px] sm:text-[8px] md:text-[9px] text-white bg-baseball-green whitespace-nowrap cursor-default ${isBatterTable ? 'batter-table-cell' : ''}`}
                     style={{ 
-                      minWidth: getMinWidth(), 
+                      ...(minWidth ? { minWidth } : {}),
                       wordBreak: 'keep-all', 
                       overflow: 'hidden', 
                       textOverflow: 'ellipsis',
@@ -170,8 +248,15 @@ function MessageBubble({
                 // 첫 번째 컬럼(구분: 1군/2군) 스타일링
                 const isDivisionColumn = columnIndex === 0 && (cellText.trim() === '1군' || cellText.trim() === '2군');
                 
+                // 부모 테이블이 타자 표인지 확인
+                const isBatterTable = props['data-batter-table'] === true;
+                
                 // 컬럼별 최소 너비 설정 (헤더와 동일하게)
                 const getMinWidth = () => {
+                  if (isBatterTable) {
+                    // 타자 표는 고정 너비 사용 (CSS에서 처리)
+                    return undefined;
+                  }
                   // 컬럼 인덱스에 따라 추정 (실제로는 헤더 텍스트를 확인해야 하지만, 인덱스로 추정)
                   if (columnIndex === 0) return '35px'; // 구분
                   if (columnIndex === 1) return '45px'; // 포지션
@@ -188,6 +273,8 @@ function MessageBubble({
                   return '50px';
                 };
                 
+                const minWidth = getMinWidth();
+                
                 return (
                   <td 
                     className={`border border-gray-300 px-0.5 sm:px-1 md:px-1.5 py-0.5 sm:py-1 md:py-1.5 text-[7px] sm:text-[8px] md:text-[9px] font-mono cursor-default whitespace-nowrap ${
@@ -196,9 +283,9 @@ function MessageBubble({
                           ? 'font-bold text-baseball-green bg-green-50' 
                           : 'font-bold text-gray-600 bg-gray-50'
                         : ''
-                    }`}
+                    } ${isBatterTable ? 'batter-table-cell' : ''}`}
                     style={{ 
-                      minWidth: getMinWidth(), 
+                      ...(minWidth ? { minWidth } : {}),
                       wordBreak: 'keep-all', 
                       overflow: 'hidden', 
                       textOverflow: 'ellipsis',
