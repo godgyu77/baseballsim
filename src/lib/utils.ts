@@ -5,6 +5,29 @@ export interface ParsedMessage {
   status?: StatusInfo;
   news?: NewsItem[];
   financeUpdate?: FinanceUpdate; // FA 보상금 등 자금 변동 정보
+  roster?: Player[]; // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 데이터
+  gameResults?: GameResult[]; // [Sim-Engine] 경기 결과 파싱 및 전적 반영
+}
+
+// [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 경기 결과 타입 정의
+export interface GameResult {
+  homeTeam: string; // 홈팀 이름 (예: "KIA", "한화")
+  awayTeam: string; // 원정팀 이름
+  homeScore: number; // 홈팀 점수
+  awayScore: number; // 원정팀 점수
+  winner: 'home' | 'away' | 'draw'; // 승자 (무승부 가능)
+  isMyTeamGame?: boolean; // 우리 팀 경기 여부 (선택적)
+  date?: string; // 경기 날짜 (선택적)
+}
+
+// [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 팀 전적 타입 정의
+export interface TeamRecord {
+  wins: number; // 승수
+  losses: number; // 패수
+  draws: number; // 무승부 수
+  gamesBehind?: number; // 게임 차 (1위와의 승차)
+  winPercentage?: number; // 승률 (0.0 ~ 1.0)
+  gamesPlayed: number; // 경기 수 (wins + losses + draws)
 }
 
 export interface GUIEvent {
@@ -26,9 +49,355 @@ export interface FinanceUpdate {
   reason: string; // 변동 사유
 }
 
+// [Money-Validation] 자금 무결성 검증 로직 추가
+export interface Transaction {
+  id: string; // 고유 ID (타임스탬프 + 랜덤)
+  date: string; // 거래 날짜 (게임 내 날짜 또는 ISO 문자열)
+  amount: number; // 변동 금액 (원 단위, 음수면 차감, 양수면 증가)
+  category: 'AI_REPORT' | 'FACILITY_UPGRADE' | 'RANDOM_EVENT' | 'FINANCE_UPDATE' | 'MANUAL_ADJUSTMENT' | 'INITIAL';
+  description: string; // 거래 설명
+  balanceAfter: number; // 거래 후 잔액 (원 단위)
+}
+
+/**
+ * [Money-Validation] 자금 무결성 검증 함수
+ * AI 응답에서 파싱된 자금과 클라이언트 누적 자금을 비교하여 오차를 검증합니다.
+ * @param aiReportedBudget AI가 보고한 자금 (원 단위)
+ * @param clientCalculatedBudget 클라이언트가 계산한 누적 자금 (원 단위)
+ * @param tolerance 허용 오차 범위 (원 단위, 기본값: 0.1억 = 10,000,000원)
+ * @returns 검증 결과 { isValid: boolean, difference: number, warning?: string }
+ */
+export function validateBudgetIntegrity(
+  aiReportedBudget: number,
+  clientCalculatedBudget: number,
+  tolerance: number = 10000000 // 0.1억 = 10,000,000원
+): { isValid: boolean; difference: number; warning?: string } {
+  const difference = Math.abs(aiReportedBudget - clientCalculatedBudget);
+  const isValid = difference <= tolerance;
+  
+  if (!isValid) {
+    const differenceInHundredMillion = (difference / 100000000).toFixed(2);
+    const aiInHundredMillion = (aiReportedBudget / 100000000).toFixed(2);
+    const clientInHundredMillion = (clientCalculatedBudget / 100000000).toFixed(2);
+    
+    const warning = `[자금 무결성 경고] AI 보고 자금과 클라이언트 누적 자금이 불일치합니다.
+    - AI 보고 자금: ${aiInHundredMillion}억 원
+    - 클라이언트 누적 자금: ${clientInHundredMillion}억 원
+    - 차이: ${differenceInHundredMillion}억 원 (허용 범위: ${(tolerance / 100000000).toFixed(2)}억 원)`;
+    
+    return { isValid: false, difference, warning };
+  }
+  
+  return { isValid: true, difference };
+}
+
+/**
+ * [Sim-Engine] 경기 결과 파싱 및 전적 반영
+ * AI 응답에서 <GAME_RESULTS> 태그를 파싱하여 경기 결과 배열을 반환합니다.
+ * @param text AI 응답 텍스트
+ * @returns 파싱된 경기 결과 배열 (파싱 실패 시 빈 배열)
+ */
+export function parseGameResults(text: string): GameResult[] {
+  try {
+    // <GAME_RESULTS> 태그 찾기
+    const gameResultsRegex = /<GAME_RESULTS>\s*(\[[\s\S]*?\])\s*<\/GAME_RESULTS>/gs;
+    const match = text.match(gameResultsRegex);
+    
+    if (!match || match.length === 0) {
+      return [];
+    }
+
+    // 첫 번째 매치에서 JSON 배열 추출
+    const jsonMatch = match[0].match(/<GAME_RESULTS>\s*(\[[\s\S]*?\])\s*<\/GAME_RESULTS>/s);
+    if (!jsonMatch || !jsonMatch[1]) {
+      return [];
+    }
+
+    // JSON 파싱
+    const resultsArray = JSON.parse(jsonMatch[1]);
+    
+    if (!Array.isArray(resultsArray)) {
+      console.error('[Sim-Engine] GAME_RESULTS 파싱 오류: 배열이 아닙니다.');
+      return [];
+    }
+
+    // GameResult 형식으로 변환
+    const gameResults: GameResult[] = resultsArray.map((result: any) => {
+      // 다양한 필드명 지원 (home/homeTeam, away/awayTeam, h_score/homeScore 등)
+      const homeTeam = result.home || result.homeTeam || '';
+      const awayTeam = result.away || result.awayTeam || '';
+      const homeScore = typeof result.h_score === 'number' 
+        ? result.h_score 
+        : (typeof result.homeScore === 'number' ? result.homeScore : parseInt(result.h_score || result.homeScore || '0'));
+      const awayScore = typeof result.a_score === 'number'
+        ? result.a_score
+        : (typeof result.awayScore === 'number' ? result.awayScore : parseInt(result.a_score || result.awayScore || '0'));
+
+      // 승자 결정
+      let winner: 'home' | 'away' | 'draw';
+      if (homeScore > awayScore) {
+        winner = 'home';
+      } else if (awayScore > homeScore) {
+        winner = 'away';
+      } else {
+        winner = 'draw';
+      }
+
+      return {
+        homeTeam,
+        awayTeam,
+        homeScore: isNaN(homeScore) ? 0 : homeScore,
+        awayScore: isNaN(awayScore) ? 0 : awayScore,
+        winner,
+        date: result.date,
+        isMyTeamGame: result.isMyTeamGame,
+      };
+    }).filter((result: GameResult) => {
+      // 필수 필드 검증
+      return result.homeTeam && result.awayTeam;
+    });
+
+    return gameResults;
+  } catch (error) {
+    console.error('[Sim-Engine] GAME_RESULTS 파싱 오류:', error);
+    return [];
+  }
+}
+
+/**
+ * [Roster-Validation] InitialData.ts에서 선수 이름 추출 함수
+ * KBO_INITIAL_DATA 문자열에서 모든 선수 이름을 추출하여 Set으로 반환합니다.
+ * @param initialDataString KBO_INITIAL_DATA 문자열
+ * @param teamName 검증할 팀 이름 (선택적, 특정 팀만 추출)
+ * @returns 선수 이름 Set (예: "류현진", "문동주", "엄상백" 등)
+ */
+export function extractPlayerNamesFromInitialData(
+  initialDataString: string,
+  teamName?: string
+): Set<string> {
+  const playerNames = new Set<string>();
+  
+  // 팀 섹션 찾기 (특정 팀만 검색하는 경우)
+  let searchText = initialDataString;
+  if (teamName) {
+    // InitialData.ts 형식: "### **1. KT 위즈 (KT Wiz)**" 또는 "### **3. 한화 이글스 (Hanwha Eagles)**"
+    // 팀 이름만으로 매칭 (괄호 안의 영어 이름은 무시)
+    // 예: "KT 위즈" 또는 "한화 이글스" 등
+    const escapedTeamName = teamName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const teamRegex = new RegExp(`###\\s*\\*\\*\\d+\\.\\s*${escapedTeamName}[\\s\\S]*?(?=###|$)`, 'i');
+    const teamMatch = searchText.match(teamRegex);
+    if (teamMatch) {
+      searchText = teamMatch[0];
+    } else {
+      // 매칭 실패 시 전체 데이터에서 검색 (디버깅용)
+      console.warn(`[Roster-Validation] 팀 이름 "${teamName}"을 InitialData.ts에서 찾을 수 없습니다. 전체 데이터에서 검색합니다.`);
+    }
+  }
+  
+  // 투수진에서 선수 이름 추출: POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE 형식
+  // 예: "선발,류현진 (39),좌투,138-143,45,60,80,60,괴물"
+  const pitcherRegex = /^[^,]+,\s*([^(]+)\s*\(/gm;
+  let match;
+  while ((match = pitcherRegex.exec(searchText)) !== null) {
+    const name = match[1].trim();
+    if (name && name.length > 0) {
+      playerNames.add(name);
+    }
+  }
+  
+  // 타자진에서 선수 이름 추출: DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE 형식
+  // 예: "1군,포수,우타,최재훈(37),55,45,35,65,35,60,주전 / .286 AVG /  1 HR /  46 BB,-,-"
+  const batterRegex = /^[^,]+,[^,]+,[^,]+,\s*([^(]+)\s*\(/gm;
+  while ((match = batterRegex.exec(searchText)) !== null) {
+    const name = match[1].trim();
+    if (name && name.length > 0) {
+      playerNames.add(name);
+    }
+  }
+  
+  return playerNames;
+}
+
+/**
+ * [Roster-Validation] 로스터 무결성 검사 추가
+ * AI 응답에서 파싱된 로스터와 현재 로스터를 비교하여 유효성을 검증합니다.
+ * @param newRoster AI가 보고한 새로운 로스터
+ * @param currentRoster 현재 게임 상태의 로스터 (비교 기준)
+ * @param initialDataPlayerNames InitialData.ts에서 추출한 선수 이름 Set (선택적, 있으면 InitialData.ts와 비교)
+ * @returns 검증 결과 { isValid: boolean, errors: string[], warnings: string[] }
+ */
+export function validateRosterIntegrity(
+  newRoster: Player[],
+  currentRoster: Player[],
+  initialDataPlayerNames?: Set<string>
+): RosterValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // 검증 로직 1: 수량 체크
+  if (currentRoster.length > 0) {
+    const sizeRatio = newRoster.length / currentRoster.length;
+    
+    // 로스터가 50% 이상 줄어들면 경고 (삭제 버그 가능성)
+    if (sizeRatio < 0.5) {
+      errors.push(
+        `[수량 체크 실패] 로스터 인원이 50% 이상 감소했습니다. ` +
+        `현재: ${currentRoster.length}명 → 새로운: ${newRoster.length}명 ` +
+        `(감소율: ${((1 - sizeRatio) * 100).toFixed(1)}%)`
+      );
+    }
+    
+    // 로스터가 비상식적으로 늘어나면 경고 (중복 추가 버그 가능성)
+    if (sizeRatio > 2.0) {
+      warnings.push(
+        `[수량 체크 경고] 로스터 인원이 비상식적으로 증가했습니다. ` +
+        `현재: ${currentRoster.length}명 → 새로운: ${newRoster.length}명 ` +
+        `(증가율: ${((sizeRatio - 1) * 100).toFixed(1)}%)`
+      );
+    }
+  }
+
+  // 검증 로직 2: 필수 데이터 체크
+  const missingDataPlayers: string[] = [];
+  newRoster.forEach((player, index) => {
+    if (!player.name || player.name.trim() === '') {
+      missingDataPlayers.push(`인덱스 ${index}: 이름 없음`);
+    }
+    if (!player.position || player.position.trim() === '') {
+      missingDataPlayers.push(`인덱스 ${index} (${player.name || '이름 없음'}): 포지션 없음`);
+    }
+  });
+
+  if (missingDataPlayers.length > 0) {
+    errors.push(
+      `[필수 데이터 누락] 다음 선수들의 필수 정보가 누락되었습니다:\n` +
+      missingDataPlayers.map(p => `  - ${p}`).join('\n')
+    );
+  }
+
+  // 검증 로직 3: 중복 체크
+  const nameCounts = new Map<string, number>();
+  const duplicatePlayers: string[] = [];
+
+  newRoster.forEach((player) => {
+    if (player.name) {
+      const count = nameCounts.get(player.name) || 0;
+      nameCounts.set(player.name, count + 1);
+      
+      if (count === 1) {
+        // 중복 발견 (두 번째 발견)
+        duplicatePlayers.push(player.name);
+      }
+    }
+  });
+
+  if (duplicatePlayers.length > 0) {
+    errors.push(
+      `[중복 선수 발견] 다음 선수들이 중복되어 있습니다:\n` +
+      duplicatePlayers.map(name => `  - ${name} (${nameCounts.get(name)}회 등장)`).join('\n')
+    );
+  }
+
+  // 검증 로직 4: ID 중복 체크 (ID가 있는 경우)
+  const idCounts = new Map<string, number>();
+  const duplicateIds: string[] = [];
+
+  newRoster.forEach((player) => {
+    if (player.id) {
+      const count = idCounts.get(player.id) || 0;
+      idCounts.set(player.id, count + 1);
+      
+      if (count === 1) {
+        duplicateIds.push(player.id);
+      }
+    }
+  });
+
+  if (duplicateIds.length > 0) {
+    errors.push(
+      `[중복 ID 발견] 다음 ID들이 중복되어 있습니다:\n` +
+      duplicateIds.map(id => `  - ${id}`).join('\n')
+    );
+  }
+
+  // 검증 로직 5: InitialData.ts와 비교 검증 (초기 로스터 검증 시)
+  if (initialDataPlayerNames && initialDataPlayerNames.size > 0) {
+    const invalidPlayers: string[] = [];
+    const missingPlayers: string[] = [];
+    
+    // AI가 출력한 선수 중 InitialData.ts에 없는 선수 찾기
+    newRoster.forEach((player) => {
+      if (player.name) {
+        const cleanName = player.name.trim();
+        // 나이 제거 (예: "류현진 (39)" -> "류현진")
+        const nameWithoutAge = cleanName.replace(/\s*\([^)]*\)\s*$/, '').trim();
+        
+        // InitialData.ts에 없는 선수인지 확인
+        if (!initialDataPlayerNames.has(nameWithoutAge) && !initialDataPlayerNames.has(cleanName)) {
+          invalidPlayers.push(`${player.name} (InitialData.ts에 존재하지 않음)`);
+        }
+      }
+    });
+    
+    // InitialData.ts에 있는 선수 중 AI가 출력하지 않은 선수 찾기 (경고만)
+    // 주의: 이 검증은 초기 로스터 출력 시에만 의미가 있음
+    if (invalidPlayers.length > 0) {
+      errors.push(
+        `[InitialData.ts 불일치] 다음 선수들이 InitialData.ts에 존재하지 않습니다 (AI가 잘못 생성한 선수):\n` +
+        invalidPlayers.map(name => `  - ${name}`).join('\n') +
+        `\n\n⚠️ 이 선수들은 AI의 외부 지식(예: 2024년 실제 용병, 은퇴 선수 등)에서 생성된 것으로 보입니다. ` +
+        `InitialData.ts에 명시된 선수만 출력해야 합니다.`
+      );
+    }
+  }
+
+  // 최종 검증 결과
+  const isValid = errors.length === 0;
+
+  return {
+    isValid,
+    errors,
+    warnings,
+  };
+}
+
 export interface NewsItem {
   title: string;
   content: string;
+}
+
+// [Roster-Validation] 로스터 무결성 검사 추가 - Player 타입 정의
+export interface Player {
+  id?: string; // 고유 ID (선택적)
+  name: string; // 선수 이름 (필수)
+  position: string; // 포지션 (필수)
+  age?: number; // 나이 (선택적)
+  division?: '1군' | '2군' | string; // 구분 (1군/2군)
+  type?: 'pitcher' | 'batter'; // 투수/타자 구분
+  stats?: {
+    // 투수 스탯
+    velocity?: string; // 구속
+    stuff?: number; // 구위 (20-80)
+    movement?: number; // 무브먼트 (20-80)
+    control?: number; // 제구 (20-80)
+    stamina?: number; // 체력 (20-80)
+    // 타자 스탯
+    contact?: number; // 컨택 (20-80)
+    gapPower?: number; // 갭파워 (20-80)
+    power?: number; // 파워 (20-80)
+    eye?: number; // 선구안 (20-80)
+    running?: number; // 주루 (20-80)
+    defense?: number; // 수비 (20-80)
+  };
+  record?: string; // 기록 (선택적)
+  salary?: number; // 연봉 (선택적)
+  note?: string; // 비고 (선택적)
+}
+
+export interface RosterValidationResult {
+  isValid: boolean;
+  errors: string[];
+  warnings: string[];
 }
 
 export type GamePhase = 'TEAM_SELECTION' | 'MAIN_GAME' | 'EVENT_MODAL' | 'NEGOTIATION' | 'RANDOM_EVENT' | 'FACILITY_MANAGEMENT';
@@ -476,6 +845,40 @@ export function parseAIResponse(message: string): ParsedMessage {
       console.warn('FINANCE_UPDATE 파싱 오류:', e);
     }
   }
+
+  // [Roster-Validation] 로스터 무결성 검사 추가 - [ROSTER] 태그 찾기 및 파싱
+  let roster: Player[] | undefined = undefined;
+  const rosterRegex = /\[ROSTER:\s*(\[[\s\S]*?\])\]/gs;
+  const rosterMatch = originalText.match(rosterRegex);
+  
+  if (rosterMatch) {
+    try {
+      const firstMatch = rosterMatch[0];
+      const jsonMatch = firstMatch.match(/\[ROSTER:\s*(\[[\s\S]*?\])\]/s);
+      if (jsonMatch && jsonMatch[1]) {
+        const rosterArray = JSON.parse(jsonMatch[1]);
+        if (Array.isArray(rosterArray)) {
+          roster = rosterArray.map((player: any) => ({
+            id: player.id || `${player.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            name: player.name || '',
+            position: player.position || '',
+            age: player.age,
+            division: player.division,
+            type: player.type,
+            stats: player.stats,
+            record: player.record,
+            salary: player.salary,
+            note: player.note,
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('[Roster-Validation] ROSTER 태그 파싱 오류:', e);
+    }
+  }
+
+  // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - <GAME_RESULTS> 태그 파싱
+  const gameResults = parseGameResults(originalText);
   
   // 2단계: 화면 표시용 텍스트 생성 (모든 시스템 태그 제거)
   const cleanText = removeSystemTags(originalText);
@@ -486,7 +889,9 @@ export function parseAIResponse(message: string): ParsedMessage {
     guiEvent, 
     status: status || undefined,
     news: news.length > 0 ? news : undefined,
-    financeUpdate: financeUpdate || undefined
+    financeUpdate: financeUpdate || undefined,
+    roster: roster || undefined, // [Roster-Validation] 로스터 무결성 검사 추가
+    gameResults: gameResults.length > 0 ? gameResults : undefined // [Sim-Engine] 경기 결과 파싱 및 전적 반영
   };
 }
 

@@ -111,7 +111,7 @@ function App() {
     setScreenView('game');
   };
 
-  const handleStartNewGame = (initialResponse?: string) => {
+  const handleStartNewGame = () => {
     // 저장된 게임 데이터 삭제
     localStorage.removeItem(SAVE_KEY);
     setShouldLoadGame(false);
@@ -119,11 +119,7 @@ function App() {
     setDifficulty(null);
     setIsGameInitializing(false);
     
-    // 초기 응답이 있으면 저장 (나중에 사용할 수 있도록)
-    if (initialResponse) {
-      console.log('게임 초기화 완료:', initialResponse.substring(0, 100) + '...');
-    }
-    
+    // 난이도 선택 화면으로 이동 (API 호출 없이 즉시)
     setScreenView('difficulty_select');
   };
 
@@ -143,8 +139,6 @@ function App() {
             apiKey={apiKey}
             onLoadGame={handleLoadGame}
             onStartNew={handleStartNewGame}
-            isLoading={isGameInitializing}
-            setIsLoading={setIsGameInitializing}
           />
         ) : screenView === 'difficulty_select' ? (
           <DifficultyModal

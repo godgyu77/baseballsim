@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Building2, Newspaper, ClipboardList } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { getGeminiModel } from '../lib/gemini';
+import { getGeminiModel, initializeGameWithData } from '../lib/gemini';
 import GameHeader from './GameHeader';
 import MessageBubble from './MessageBubble';
 import LoadingOverlay from './LoadingOverlay';
@@ -10,8 +10,10 @@ import RandomEventModal from './RandomEventModal';
 import FacilityManagement from './FacilityManagement';
 import OptionsModal from './OptionsModal';
 import NewsSidebar, { NewsItem } from './NewsSidebar';
-import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo } from '../lib/utils';
+import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo, Transaction, validateBudgetIntegrity, Player, validateRosterIntegrity, extractPlayerNamesFromInitialData, GameResult, TeamRecord } from '../lib/utils';
+import { getInitialBudget } from '../constants/GameConfig';
 import { Team } from '../constants/TeamData';
+import { KBO_INITIAL_DATA } from '../constants/prompts';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
 import { createInitialFacilityState, FACILITY_DEFINITIONS } from '../constants/Facilities';
@@ -70,6 +72,12 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
   const [isNewsOpen, setIsNewsOpen] = useState(false);
   const [readNewsCount, setReadNewsCount] = useState(0); // 읽은 뉴스 개수 추적
   const [hasCheckedLoadGame, setHasCheckedLoadGame] = useState(false); // 불러오기 시 옵션 체크 플래그
+  // [Money-Validation] 자금 무결성 검증 로직 추가 - 거래 내역 관리
+  const [transactionHistory, setTransactionHistory] = useState<Transaction[]>([]);
+  // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 상태 관리
+  const [currentRoster, setCurrentRoster] = useState<Player[]>([]); // 현재 로스터 상태
+  // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 상태 관리
+  const [leagueStandings, setLeagueStandings] = useState<Record<string, TeamRecord>>({}); // 팀별 전적 맵 (팀 이름 -> 전적)
   const isLoadProcessingRef = useRef(false); // 불러오기 중복 방지 플래그
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInstanceRef = useRef<any>(null);
@@ -174,13 +182,40 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
               setGameState(prev => ({ ...prev, date: parsed.status!.date! }));
             }
             if (parsed.status.budget) {
+              // [Money-Validation] 자금 무결성 검증 로직 추가
               // "50억 원" 또는 "-30.0억 원" 형식에서 숫자 추출 (마이너스 값도 처리)
               const budgetMatch = parsed.status.budget.match(/(-?[0-9,.]+)\s*억/i);
               if (budgetMatch) {
                 const amount = parseFloat(budgetMatch[1].replace(/,/g, ''));
                 if (!isNaN(amount)) {
-                  // 마이너스 값도 허용 (부채 상태)
-                  setGameState(prev => ({ ...prev, budget: Math.floor(amount * 100000000) }));
+                  const aiReportedBudget = Math.floor(amount * 100000000); // 원 단위로 변환
+                  
+                  setGameState(prev => {
+                    // transactionHistory의 마지막 잔액과 비교하여 검증
+                    const lastTransaction = transactionHistory[transactionHistory.length - 1];
+                    const clientCalculatedBudget = lastTransaction ? lastTransaction.balanceAfter : (prev.budget || 0);
+                    
+                    // 자금 무결성 검증
+                    const validation = validateBudgetIntegrity(aiReportedBudget, clientCalculatedBudget);
+                    if (!validation.isValid && validation.warning) {
+                      console.warn(validation.warning);
+                    }
+                    
+                    // 거래 내역에 기록
+                    const transaction: Transaction = {
+                      id: `ai-report-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                      date: parsed.status!.date || new Date().toISOString(),
+                      amount: aiReportedBudget - clientCalculatedBudget, // 변동 금액
+                      category: 'AI_REPORT',
+                      description: `AI 응답: ${parsed.status.budget}`,
+                      balanceAfter: aiReportedBudget,
+                    };
+                    
+                    setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+                    
+                    // 마이너스 값도 허용 (부채 상태)
+                    return { ...prev, budget: aiReportedBudget };
+                  });
                 }
               }
             }
@@ -191,13 +226,27 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           
           // FINANCE_UPDATE 태그 처리 (FA 보상금 등 자금 변동)
           if (parsed.financeUpdate) {
+            // [Money-Validation] 자금 무결성 검증 로직 추가
             const { amount, reason } = parsed.financeUpdate;
             console.log(`[자금 변동] ${reason}: ${amount > 0 ? '+' : ''}${(amount / 100000000).toFixed(1)}억 원`);
             setGameState(prev => {
               if (prev.budget !== null) {
-                const newBudget = prev.budget + amount;
+                const newBudget = Math.max(0, prev.budget + amount);
                 console.log(`[자금 변동] ${(prev.budget / 100000000).toFixed(1)}억 원 → ${(newBudget / 100000000).toFixed(1)}억 원`);
-                return { ...prev, budget: Math.max(0, newBudget) };
+                
+                // 거래 내역에 기록
+                const transaction: Transaction = {
+                  id: `finance-update-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                  date: parsed.status?.date || new Date().toISOString(),
+                  amount: amount,
+                  category: 'FINANCE_UPDATE',
+                  description: reason,
+                  balanceAfter: newBudget,
+                };
+                
+                setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+                
+                return { ...prev, budget: newBudget };
               }
               return prev;
             });
@@ -206,6 +255,157 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           // NEWS 태그 처리 (뉴스 사이드바에 추가)
           if (parsed.news && parsed.news.length > 0) {
             setNewsItems(prev => [...prev, ...parsed.news!]);
+          }
+
+          // [Roster-Validation] 로스터 무결성 검사 추가
+          // [ROSTER] 태그에서 로스터 데이터가 있는 경우 검증 및 업데이트
+          if (parsed.roster && Array.isArray(parsed.roster) && parsed.roster.length > 0) {
+            // 초기 로스터 출력 시 InitialData.ts와 비교 검증 (currentRoster가 비어있을 때만)
+            const isInitialRoster = currentRoster.length === 0;
+            // InitialData.ts의 팀 이름 형식과 매칭 (예: "한화 이글스", "KT 위즈" 등)
+            const teamNameForValidation = selectedTeam.fullName; // "한화 이글스", "KT 위즈" 등
+            const initialDataPlayerNames = isInitialRoster 
+              ? extractPlayerNamesFromInitialData(KBO_INITIAL_DATA, teamNameForValidation)
+              : undefined;
+            
+            // 로스터 무결성 검증
+            const validation = validateRosterIntegrity(
+              parsed.roster, 
+              currentRoster,
+              initialDataPlayerNames
+            );
+            
+            if (!validation.isValid) {
+              // 검증 실패: 경고 로그 출력 및 기존 로스터 유지 (Fail-Safe)
+              console.error('[Roster-Validation] AI 데이터 오류 감지: 로스터 업데이트를 건너뜁니다.');
+              console.error('[Roster-Validation] 검증 실패 사유:');
+              validation.errors.forEach((error, index) => {
+                console.error(`  ${index + 1}. ${error}`);
+              });
+              if (validation.warnings.length > 0) {
+                console.warn('[Roster-Validation] 경고 사항:');
+                validation.warnings.forEach((warning, index) => {
+                  console.warn(`  ${index + 1}. ${warning}`);
+                });
+              }
+              // 기존 로스터 상태 유지 (업데이트 방지)
+            } else {
+              // 검증 성공: 로스터 업데이트
+              if (validation.warnings.length > 0) {
+                console.warn('[Roster-Validation] 경고 사항 (업데이트는 진행):');
+                validation.warnings.forEach((warning, index) => {
+                  console.warn(`  ${index + 1}. ${warning}`);
+                });
+              }
+              setCurrentRoster(parsed.roster);
+              console.log(`[Roster-Validation] ✅ 로스터 업데이트 완료: ${parsed.roster.length}명`);
+            }
+          }
+
+          // GUI_EVENT에서 로스터 데이터가 있는 경우 검증 (향후 확장용)
+          if (parsed.guiEvent && parsed.guiEvent.type === 'RECRUIT' && parsed.guiEvent.candidates) {
+            // 후보 선수 목록이 있는 경우 (드래프트, FA 등)
+            // 현재는 후보 목록이므로 로스터 검증은 생략
+            // 향후 실제 로스터 업데이트 시 검증 로직 적용
+          }
+
+          // [Sim-Engine] 경기 결과 파싱 및 전적 반영
+          if (parsed.gameResults && parsed.gameResults.length > 0) {
+            setLeagueStandings(prevStandings => {
+              const newStandings = { ...prevStandings };
+              let myTeamWins = 0;
+              let myTeamLosses = 0;
+              let myTeamDraws = 0;
+
+              parsed.gameResults!.forEach((result) => {
+                // 홈팀 전적 업데이트
+                if (!newStandings[result.homeTeam]) {
+                  newStandings[result.homeTeam] = {
+                    wins: 0,
+                    losses: 0,
+                    draws: 0,
+                    gamesPlayed: 0,
+                  };
+                }
+
+                // 원정팀 전적 업데이트
+                if (!newStandings[result.awayTeam]) {
+                  newStandings[result.awayTeam] = {
+                    wins: 0,
+                    losses: 0,
+                    draws: 0,
+                    gamesPlayed: 0,
+                  };
+                }
+
+                // 승/패/무 업데이트
+                if (result.winner === 'home') {
+                  newStandings[result.homeTeam].wins++;
+                  newStandings[result.awayTeam].losses++;
+                  
+                  // 우리 팀 경기인 경우 전적 추적
+                  if (result.isMyTeamGame) {
+                    if (result.homeTeam === selectedTeam.name || result.homeTeam === selectedTeam.fullName) {
+                      myTeamWins++;
+                    } else {
+                      myTeamLosses++;
+                    }
+                  }
+                } else if (result.winner === 'away') {
+                  newStandings[result.homeTeam].losses++;
+                  newStandings[result.awayTeam].wins++;
+                  
+                  // 우리 팀 경기인 경우 전적 추적
+                  if (result.isMyTeamGame) {
+                    if (result.awayTeam === selectedTeam.name || result.awayTeam === selectedTeam.fullName) {
+                      myTeamWins++;
+                    } else {
+                      myTeamLosses++;
+                    }
+                  }
+                } else {
+                  // 무승부
+                  newStandings[result.homeTeam].draws++;
+                  newStandings[result.awayTeam].draws++;
+                  
+                  if (result.isMyTeamGame) {
+                    myTeamDraws++;
+                  }
+                }
+
+                // 경기 수 업데이트
+                newStandings[result.homeTeam].gamesPlayed++;
+                newStandings[result.awayTeam].gamesPlayed++;
+              });
+
+              // 승률 계산
+              Object.keys(newStandings).forEach(teamName => {
+                const record = newStandings[teamName];
+                if (record.gamesPlayed > 0) {
+                  record.winPercentage = record.wins / record.gamesPlayed;
+                } else {
+                  record.winPercentage = 0;
+                }
+              });
+
+              // UI Feedback: 경기 결과가 파싱되면 사용자에게 알림
+              if (myTeamWins > 0 || myTeamLosses > 0 || myTeamDraws > 0) {
+                const myTeamRecord = newStandings[selectedTeam.name] || newStandings[selectedTeam.fullName];
+                if (myTeamRecord) {
+                  console.log(
+                    `[Sim-Engine] 경기 결과가 반영되었습니다. ` +
+                    `현재 전적: ${myTeamRecord.wins}승 ${myTeamRecord.losses}패 ${myTeamRecord.draws}무 ` +
+                    `(승률: ${(myTeamRecord.winPercentage! * 100).toFixed(3)}%)`
+                  );
+                  // TODO: 향후 Toast 알림 컴포넌트 추가 시 아래 주석 해제
+                  // toast.success(`경기 결과 반영: ${myTeamRecord.wins}승 ${myTeamRecord.losses}패 ${myTeamRecord.draws}무`);
+                }
+              } else {
+                console.log(`[Sim-Engine] 경기 결과가 반영되었습니다. (${parsed.gameResults.length}경기 처리)`);
+              }
+
+              return newStandings;
+            });
           }
           
           // 옵션이 있으면 플로팅 버튼만 표시 (모달은 즉시 띄우지 않음)
@@ -392,6 +592,18 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                 if (parsed.readNewsCount !== undefined) {
                   setReadNewsCount(parsed.readNewsCount);
                 }
+                // [Money-Validation] 자금 무결성 검증 로직 추가 - 거래 내역 복원
+                if (parsed.transactionHistory && Array.isArray(parsed.transactionHistory)) {
+                  setTransactionHistory(parsed.transactionHistory);
+                }
+                // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
+                if (parsed.currentRoster && Array.isArray(parsed.currentRoster)) {
+                  setCurrentRoster(parsed.currentRoster);
+                }
+                // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
+                if (parsed.leagueStandings && typeof parsed.leagueStandings === 'object') {
+                  setLeagueStandings(parsed.leagueStandings);
+                }
                 
                 // 모델에 메시지 히스토리 복원 (API 연결 유지)
                 if (modelRef.current && parsed.messages.length > 0) {
@@ -504,41 +716,55 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     pendingOptionsRef.current = pendingOptions;
   }, [pendingOptions]);
 
+  // 게임 초기화 플래그 (중복 호출 방지)
+  const isInitializingRef = useRef(false);
+
   useEffect(() => {
     const savedData = localStorage.getItem(SAVE_KEY);
     const hasSavedData = savedData && JSON.parse(savedData).messages?.length > 0;
     
-    // 새 게임 시작 시: 저장된 데이터가 없으면 초기 메시지 전송
-    if (selectedTeam && messages.length === 0 && isModelReady && modelRef.current && !hasSavedData) {
+    // 새 게임 시작 시: 저장된 데이터가 없으면 initializeGameWithData 호출
+    if (selectedTeam && messages.length === 0 && isModelReady && modelRef.current && !hasSavedData && !isInitializingRef.current) {
+      isInitializingRef.current = true;
+      
       // 옵션 초기화 (일정 진행 버튼만 표시되도록) - 함수형 업데이트로 중복 방지
       setPendingOptions(prev => prev.length === 0 ? prev : []);
       setCurrentOptions(prev => prev.length === 0 ? prev : []);
       
-      // 신생 구단인 경우 특별 처리
-      // 프롬프트의 Step 2에 따라 난이도를 명시적으로 전달
-      const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
-      const difficultyCode = difficulty; // EASY, NORMAL, HELL
+      // 로딩 시작
+      setIsLoading(true);
+      setLoadingStatusText(undefined); // 롤링 텍스트 사용
       
-      // 난이도별 초기 자금 및 샐러리캡 정보를 명시적으로 전달 (AI가 변경하지 못하도록)
-      const difficultyConfig = difficulty === 'EASY' 
-        ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
-        : difficulty === 'NORMAL'
-        ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
-        : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
-      
-      let teamMessage: string;
-      if (selectedTeam.id === 'expansion') {
-        // 프롬프트 Step 2-1: 신생 구단 창단 절차 시작
-        const ownerTypeName = expansionTeamData?.ownerType === 'A' 
-          ? 'A유형: 성적 지상주의 (Win-Now)'
-          : expansionTeamData?.ownerType === 'B'
-          ? 'B유형: 비즈니스맨 (Profit-First)'
-          : expansionTeamData?.ownerType === 'C'
-          ? 'C유형: 시스템/재건 (Rebuilder)'
-          : 'D유형: 의리의 대부 (The Godfather)';
-        
-        // 시설 정보 문자열 생성
-        const facilityInfo = `**[현재 시설 레벨]**
+      // [FIX] Force Empty History to prevent API Error
+      // initializeGameWithData 호출 (팀 정보 및 난이도 포함)
+      // 주의: messages 상태를 인자로 넘기지 않음 (API 규칙 준수)
+      // initializeGameWithData 내부에서 history: []로 빈 세션을 강제로 시작하므로,
+      // 이전 UI에 있던 텍스트(Model 응답)는 절대 전달되지 않음
+      // 이 함수는 history 인자를 받지 않으며, 받더라도 무시하고 빈 배열로 시작함
+      initializeGameWithData(apiKey, selectedTeam, difficulty)
+        .then((initialResponse) => {
+          // 초기 응답을 첫 메시지로 추가
+          setMessages([{ text: initialResponse, isUser: false }]);
+          
+          // 신생 구단인 경우 추가 정보 전송
+          if (selectedTeam.id === 'expansion') {
+            const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
+            const difficultyCode = difficulty;
+            const difficultyConfig = difficulty === 'EASY' 
+              ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
+              : difficulty === 'NORMAL'
+              ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
+              : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
+            
+            const ownerTypeName = expansionTeamData?.ownerType === 'A' 
+              ? 'A유형: 성적 지상주의 (Win-Now)'
+              : expansionTeamData?.ownerType === 'B'
+              ? 'B유형: 비즈니스맨 (Profit-First)'
+              : expansionTeamData?.ownerType === 'C'
+              ? 'C유형: 시스템/재건 (Rebuilder)'
+              : 'D유형: 의리의 대부 (The Godfather)';
+            
+            const facilityInfo = `**[현재 시설 레벨]**
 - 훈련장: Lv.${facilities.training.level} (경험치 획득량 +${facilities.training.level * 10}%)
 - 메디컬 센터: Lv.${facilities.medical.level} (부상 확률 -${facilities.medical.level * 5}%, 회복 속도 +${facilities.medical.level * 10}%)
 - 마케팅 팀: Lv.${facilities.marketing.level} (경기당 수익 +${facilities.marketing.level * 5}%, 후원금 +${facilities.marketing.level * 3}%)
@@ -546,7 +772,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
 
 위 시설 레벨에 따라 게임 로직(부상 회복 속도, 경험치 획득량, 수익 등)을 적용해주세요.`;
 
-        teamMessage = `✨ 신생 구단 창단 (11구단)을 선택했습니다. 
+            const teamMessage = `✨ 신생 구단 창단 (11구단)을 선택했습니다. 
 
 **[구단 정보]**
 연고지: ${expansionTeamData?.city || '미정'}
@@ -560,9 +786,23 @@ ${difficultyConfig}
 이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 신생 구단 창단 프로세스를 시작해주세요.
 
 ${facilityInfo}`;
-      } else {
-        // 시설 정보 문자열 생성
-        const facilityInfo = `**[현재 시설 레벨]**
+            
+            setTimeout(() => {
+              if (handleSendRef.current) {
+                handleSendRef.current(teamMessage);
+              }
+            }, 500);
+          } else {
+            // 일반 구단인 경우 난이도 정보만 전송
+            const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
+            const difficultyCode = difficulty;
+            const difficultyConfig = difficulty === 'EASY' 
+              ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
+              : difficulty === 'NORMAL'
+              ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
+              : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
+            
+            const facilityInfo = `**[현재 시설 레벨]**
 - 훈련장: Lv.${facilities.training.level} (경험치 획득량 +${facilities.training.level * 10}%)
 - 메디컬 센터: Lv.${facilities.medical.level} (부상 확률 -${facilities.medical.level * 5}%, 회복 속도 +${facilities.medical.level * 10}%)
 - 마케팅 팀: Lv.${facilities.marketing.level} (경기당 수익 +${facilities.marketing.level * 5}%, 후원금 +${facilities.marketing.level * 3}%)
@@ -570,8 +810,7 @@ ${facilityInfo}`;
 
 위 시설 레벨에 따라 게임 로직(부상 회복 속도, 경험치 획득량, 수익 등)을 적용해주세요.`;
 
-        // 프롬프트 Step 2: 구단 선택 완료, Step 3으로 진행
-        teamMessage = `${selectedTeam.fullName}을 선택했습니다. 
+            const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 
 
 **[난이도 설정 - 절대 변경 금지]**
 난이도: ${difficultyMode} (${difficultyCode})
@@ -580,14 +819,22 @@ ${difficultyConfig}
 이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 Step 3: 데이터 초기화 및 게임을 시작해주세요.
 
 ${facilityInfo}`;
-      }
-      // 약간의 지연을 두어 모든 초기화가 완료되도록 함
-      const timer = setTimeout(() => {
-        if (handleSendRef.current) {
-          handleSendRef.current(teamMessage);
-        }
-      }, 300);
-      return () => clearTimeout(timer);
+            
+            setTimeout(() => {
+              if (handleSendRef.current) {
+                handleSendRef.current(teamMessage);
+              }
+            }, 500);
+          }
+          
+          setIsLoading(false);
+        })
+        .catch((error) => {
+          console.error('게임 초기화 실패:', error);
+          alert('게임 초기화에 실패했습니다. 다시 시도해주세요.');
+          setIsLoading(false);
+          isInitializingRef.current = false;
+        });
     }
     
     // 불러오기 시: 저장된 메시지가 복원된 후, 마지막 AI 응답에 옵션이 없으면 초기 메시지 전송
@@ -670,17 +917,41 @@ ${facilityInfo}`;
         console.log('[자금 파싱] 텍스트에서 자금 추출:', extractedBudget);
       }
       
+      // [Money-Validation] 자금 무결성 검증 로직 추가
       // 자금 업데이트: 시설 업그레이드 등으로 로컬에서 차감한 경우, AI 응답의 자금이 더 크면 업데이트하지 않음
       if (extractedBudget !== null && extractedBudget > 0) {
         setGameState(prev => {
+          // transactionHistory의 마지막 잔액과 비교하여 검증
+          const lastTransaction = transactionHistory[transactionHistory.length - 1];
+          const clientCalculatedBudget = lastTransaction ? lastTransaction.balanceAfter : (prev.budget || 0);
+          
+          // 자금 무결성 검증
+          const validation = validateBudgetIntegrity(extractedBudget!, clientCalculatedBudget);
+          if (!validation.isValid && validation.warning) {
+            console.warn(validation.warning);
+          }
+          
           // 로컬 자금이 AI 응답 자금보다 작으면 (차감이 발생한 경우) 로컬 자금 유지
-          if (prev.budget !== null && prev.budget < extractedBudget) {
+          if (prev.budget !== null && prev.budget < extractedBudget!) {
             console.log('[자금 파싱] ⚠️ 로컬 자금이 더 작음 (차감 발생). 로컬 자금 유지:', prev.budget.toLocaleString('ko-KR') + '원');
             return prev;
           }
+          
+          // 거래 내역에 기록 (AI 응답으로 업데이트하는 경우)
+          const transaction: Transaction = {
+            id: `text-extract-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            date: parsed.status?.date || new Date().toISOString(),
+            amount: extractedBudget! - clientCalculatedBudget, // 변동 금액
+            category: 'AI_REPORT',
+            description: '텍스트에서 자금 추출',
+            balanceAfter: extractedBudget!,
+          };
+          
+          setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+          
           // 그 외의 경우 (AI 응답이 더 작거나 같으면) AI 응답으로 업데이트
-          console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget.toLocaleString('ko-KR') + '원');
-          return { ...prev, budget: extractedBudget };
+          console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget!.toLocaleString('ko-KR') + '원');
+          return { ...prev, budget: extractedBudget! };
         });
       } else {
         console.log('[자금 파싱] ❌ 자금 추출 실패 또는 0원');
@@ -694,6 +965,26 @@ ${facilityInfo}`;
   useEffect(() => {
     isLoadingRef.current = isLoading;
   }, [isLoading]);
+
+  // [Money-Validation] 자금 무결성 검증 로직 추가 - 초기 자금 Transaction 기록
+  // 게임 시작 시 초기 자금이 설정되고 transactionHistory가 비어있을 때 초기 Transaction 기록
+  useEffect(() => {
+    if (gameState.budget !== null && transactionHistory.length === 0) {
+      const initialBudget = getInitialBudget(difficulty);
+      // 초기 자금이 설정되었고 거래 내역이 없으면 초기 Transaction 기록
+      if (Math.abs(gameState.budget - initialBudget) < 10000000) { // 0.1억 이내 차이면 초기 자금으로 간주
+        const initialTransaction: Transaction = {
+          id: `initial-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          date: gameState.date || new Date().toISOString(),
+          amount: initialBudget,
+          category: 'INITIAL',
+          description: `게임 시작 - ${difficulty} 모드 초기 자금`,
+          balanceAfter: initialBudget,
+        };
+        setTransactionHistory([initialTransaction]);
+      }
+    }
+  }, [gameState.budget, gameState.date, difficulty, transactionHistory.length]);
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -733,6 +1024,7 @@ ${facilityInfo}`;
 
   // 랜덤 이벤트 효과 적용
   const applyEventEffect = (effect: RandomEvent['effect']) => {
+    // [Money-Validation] 자금 무결성 검증 로직 추가
     setGameState((prev) => {
       const newState = { ...prev };
       
@@ -744,6 +1036,18 @@ ${facilityInfo}`;
         // 자금 변동이 있으면 콘솔에 로그 (디버깅용)
         if (change !== 0) {
           console.log(`[랜덤 이벤트] 자금 변동: ${change > 0 ? '+' : ''}${(change / 100000000).toFixed(1)}억 원`);
+          
+          // 거래 내역에 기록
+          const transaction: Transaction = {
+            id: `random-event-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            date: newState.date || new Date().toISOString(),
+            amount: change,
+            category: 'RANDOM_EVENT',
+            description: `랜덤 이벤트: ${change > 0 ? '수익' : '손실'}`,
+            balanceAfter: newState.budget,
+          };
+          
+          setTransactionHistory(prevHistory => [...prevHistory, transaction]);
         }
       }
       
@@ -820,6 +1124,19 @@ ${facilityInfo}`;
     const newBudget = gameState.budget - upgradeCost;
     const newLevel = facility.level + 1;
     
+    // [Money-Validation] 자금 무결성 검증 로직 추가
+    // 거래 내역에 기록
+    const transaction: Transaction = {
+      id: `facility-upgrade-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      date: gameState.date || new Date().toISOString(),
+      amount: -upgradeCost, // 차감이므로 음수
+      category: 'FACILITY_UPGRADE',
+      description: `${definition.name} Lv.${facility.level} → Lv.${newLevel} 업그레이드`,
+      balanceAfter: newBudget,
+    };
+    
+    setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+    
     // 로컬 상태 업데이트
     setGameState((prev) => ({
       ...prev,
@@ -872,6 +1189,9 @@ ${definition.effect(newLevel).description}
         selectedTeam: selectedTeam, // 팀 전체 정보 저장
         pendingOptions: pendingOptions, // 지시사항 버튼을 위한 옵션 저장
         difficulty: difficulty, // 난이도 저장
+        transactionHistory: transactionHistory, // [Money-Validation] 자금 무결성 검증 로직 추가 - 거래 내역 저장
+        currentRoster: currentRoster, // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 저장
+        leagueStandings: leagueStandings, // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 저장
         timestamp: new Date().toISOString(),
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
@@ -881,7 +1201,7 @@ ${definition.effect(newLevel).description}
       console.error('저장 오류:', e);
       alert('저장에 실패했습니다.');
     }
-  }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, pendingOptions, difficulty, playSound]);
+  }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, pendingOptions, difficulty, transactionHistory, currentRoster, leagueStandings, playSound]);
 
   // 불러오기 기능
   const handleLoad = useCallback(async () => {
@@ -935,6 +1255,18 @@ ${definition.effect(newLevel).description}
       }
       if (parsed.readNewsCount !== undefined) {
         setReadNewsCount(parsed.readNewsCount);
+      }
+      // [Money-Validation] 자금 무결성 검증 로직 추가 - 거래 내역 복원
+      if (parsed.transactionHistory && Array.isArray(parsed.transactionHistory)) {
+        setTransactionHistory(parsed.transactionHistory);
+      }
+      // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
+      if (parsed.currentRoster && Array.isArray(parsed.currentRoster)) {
+        setCurrentRoster(parsed.currentRoster);
+      }
+      // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
+      if (parsed.leagueStandings && typeof parsed.leagueStandings === 'object') {
+        setLeagueStandings(parsed.leagueStandings);
       }
 
       // **핵심**: 모델에 메시지 히스토리 복원하여 API 연결 유지

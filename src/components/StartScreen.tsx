@@ -1,31 +1,15 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import { FolderOpen, Play } from 'lucide-react';
-import { initializeGameWithData } from '../lib/gemini';
-import LoadingOverlay from './LoadingOverlay';
 
 interface StartScreenProps {
   apiKey: string;
   onLoadGame: () => void;
-  onStartNew: (initialResponse?: string) => void;
-  isLoading?: boolean;
-  setIsLoading?: (loading: boolean) => void;
+  onStartNew: () => void;
 }
 
-export default function StartScreen({ apiKey, onLoadGame, onStartNew, isLoading = false, setIsLoading }: StartScreenProps) {
+export default function StartScreen({ apiKey, onLoadGame, onStartNew }: StartScreenProps) {
   const isProcessingRef = React.useRef(false);
-  const [localLoading, setLocalLoading] = useState(false);
-  
-  // 로딩 상태 관리 (부모에서 전달된 setIsLoading이 있으면 사용, 없으면 로컬 상태 사용)
-  const handleSetLoading = (loading: boolean) => {
-    if (setIsLoading) {
-      setIsLoading(loading);
-    } else {
-      setLocalLoading(loading);
-    }
-  };
-  
-  const actualLoading = setIsLoading ? isLoading : localLoading;
   
   const handleLoadGame = (e?: React.MouseEvent | React.TouchEvent) => {
     // 모바일 터치 이벤트 중복 방지
@@ -69,7 +53,6 @@ export default function StartScreen({ apiKey, onLoadGame, onStartNew, isLoading 
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-baseball-green via-[#0a3528] to-baseball-green-dark flex items-center justify-center p-3 sm:p-4 relative">
-      <LoadingOverlay isLoading={actualLoading} statusText="게임 데이터를 초기화하는 중입니다..." />
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -113,28 +96,19 @@ export default function StartScreen({ apiKey, onLoadGame, onStartNew, isLoading 
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={async () => {
-              if (actualLoading || isProcessingRef.current) return;
-              
+            onClick={() => {
+              if (isProcessingRef.current) return;
               isProcessingRef.current = true;
-              handleSetLoading(true);
-              
-              try {
-                const initialResponse = await initializeGameWithData(apiKey);
-                onStartNew(initialResponse);
-              } catch (error) {
-                console.error('게임 데이터 로딩 실패:', error);
-                alert('게임 데이터 로딩 실패');
-                handleSetLoading(false);
-              } finally {
+              onStartNew();
+              // 약간의 지연 후 플래그 해제
+              setTimeout(() => {
                 isProcessingRef.current = false;
-              }
+              }, 500);
             }}
-            disabled={actualLoading}
-            className="flex items-center justify-center gap-3 bg-baseball-gold hover:bg-yellow-500 text-white font-bold text-lg px-8 py-4 rounded-xl shadow-2xl transition-all w-full sm:w-auto min-w-[200px] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center justify-center gap-3 bg-baseball-gold hover:bg-yellow-500 text-white font-bold text-lg px-8 py-4 rounded-xl shadow-2xl transition-all w-full sm:w-auto min-w-[200px]"
           >
             <Play className="w-6 h-6" />
-            {actualLoading ? '로딩 중...' : '새 게임 시작'}
+            새 게임 시작
           </motion.button>
         </motion.div>
       </motion.div>
