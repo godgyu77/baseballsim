@@ -67,7 +67,7 @@ export default function OptionsModal({
               {/* Content */}
               <div className="px-2 sm:px-3 md:px-4 lg:px-6 py-2 sm:py-3 md:py-4 lg:py-5 overflow-y-auto flex-1 overscroll-contain">
                 <div className="space-y-2 sm:space-y-2.5">
-                  {/* 고정 "일정 진행" 버튼 - 항상 맨 위에 표시 */}
+                  {/* 고정 "다음 이벤트까지 진행" 버튼 - 항상 맨 위에 표시 */}
                   <motion.button
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
@@ -75,7 +75,7 @@ export default function OptionsModal({
                     whileHover={{ scale: 1.02, y: -2 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => {
-                      onSelect("다음 날로 진행");
+                      onSelect("다음 이벤트까지 진행");
                       onClose();
                     }}
                     className="w-full text-center px-3 sm:px-4 md:px-5 lg:px-6 py-2.5 sm:py-3 md:py-3.5 lg:py-4 bg-gradient-to-r from-baseball-gold via-yellow-400 to-baseball-gold border-2 border-baseball-green shadow-lg hover:shadow-xl active:shadow-md transition-all group touch-manipulation rounded-lg sm:rounded-xl relative overflow-hidden min-h-[48px] sm:min-h-[52px] md:min-h-[56px]"
@@ -98,7 +98,7 @@ export default function OptionsModal({
                         ⏭️
                       </span>
                       <span className="font-black text-xs sm:text-sm md:text-base lg:text-lg text-baseball-green drop-shadow-sm whitespace-nowrap">
-                        일정 진행
+                        다음 이벤트까지 진행
                       </span>
                     </div>
                   </motion.button>

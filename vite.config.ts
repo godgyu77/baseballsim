@@ -10,8 +10,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          // 큰 상수 파일을 별도 청크로 분리
-          'game-constants': ['./src/constants/GameConstants'],
           // Google Generative AI 라이브러리를 별도 청크로 분리
           'gemini': ['@google/generative-ai'],
           // React 관련 라이브러리 분리

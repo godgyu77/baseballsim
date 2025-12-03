@@ -42,7 +42,8 @@ npm run build
 
 1. 게임 시작 시 Gemini API 키를 입력해야 합니다.
 2. API 키는 브라우저 로컬 스토리지에 저장됩니다.
-3. 시스템 프롬프트는 `src/constants/GameConstants.ts`의 `SYSTEM_PROMPT`에 설정할 수 있습니다.
+3. 시스템 프롬프트는 `src/constants/prompts/SystemLogic.ts`의 `KBO_SYSTEM_LOGIC`에 설정되어 있습니다.
+4. 게임 설정(난이도별 자금, 샐러리캡 등)은 `src/constants/GameConfig.ts`에서 관리됩니다.
 
 ## 배포하기
 

@@ -4,6 +4,7 @@ export interface ParsedMessage {
   guiEvent?: GUIEvent;
   status?: StatusInfo;
   news?: NewsItem[];
+  financeUpdate?: FinanceUpdate; // FA 보상금 등 자금 변동 정보
 }
 
 export interface GUIEvent {
@@ -17,6 +18,12 @@ export interface StatusInfo {
   date?: string;
   budget?: string;
   budgetValue?: number; // 숫자 형태의 자금 값 (억 단위)
+  salaryCapUsage?: number; // 샐러리캡 소진율 (0.0 ~ 100.0)
+}
+
+export interface FinanceUpdate {
+  amount: number; // 변동 금액 (원 단위, 음수면 차감, 양수면 증가)
+  reason: string; // 변동 사유
 }
 
 export interface NewsItem {
@@ -160,10 +167,14 @@ function removeSystemTags(text: string): string {
     // [NEWS: ...] 패턴 제거 (멀티라인 지원)
     cleaned = cleaned.replace(/\[NEWS:[\s\S]*?\]/gs, '');
     
+    // [FINANCE_UPDATE: ...] 패턴 제거 (멀티라인 지원)
+    cleaned = cleaned.replace(/\[FINANCE_UPDATE:[\s\S]*?\]/gs, '');
+    
     // 불완전한 태그도 제거 (스트리밍 중 부분적으로 나타나는 경우)
     cleaned = cleaned.replace(/\[GUI_EVENT:[\s\S]*$/gs, '');
     cleaned = cleaned.replace(/\[OPTIONS:[\s\S]*$/gs, '');
     cleaned = cleaned.replace(/\[STATUS:[\s\S]*$/gs, '');
+    cleaned = cleaned.replace(/\[FINANCE_UPDATE:[\s\S]*$/gs, '');
     cleaned = cleaned.replace(/\[NEWS:[\s\S]*$/gs, '');
     
     // 일반적인 시스템 태그 패턴 제거
@@ -442,6 +453,29 @@ export function parseAIResponse(message: string): ParsedMessage {
       console.warn('NEWS 파싱 오류:', e);
     }
   }
+
+  // [FINANCE_UPDATE] 태그 찾기 및 파싱
+  let financeUpdate: FinanceUpdate | undefined = undefined;
+  const financeUpdateRegex = /\[FINANCE_UPDATE:\s*(\{[\s\S]*?\})\]/gs;
+  const financeUpdateMatch = originalText.match(financeUpdateRegex);
+  
+  if (financeUpdateMatch) {
+    try {
+      const firstMatch = financeUpdateMatch[0];
+      const jsonMatch = firstMatch.match(/\[FINANCE_UPDATE:\s*(\{[\s\S]*?\})\]/s);
+      if (jsonMatch && jsonMatch[1]) {
+        const financeJson = JSON.parse(jsonMatch[1]);
+        if (financeJson.amount !== undefined && financeJson.reason) {
+          financeUpdate = {
+            amount: typeof financeJson.amount === 'number' ? financeJson.amount : parseFloat(financeJson.amount),
+            reason: financeJson.reason,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('FINANCE_UPDATE 파싱 오류:', e);
+    }
+  }
   
   // 2단계: 화면 표시용 텍스트 생성 (모든 시스템 태그 제거)
   const cleanText = removeSystemTags(originalText);
@@ -451,7 +485,8 @@ export function parseAIResponse(message: string): ParsedMessage {
     options, 
     guiEvent, 
     status: status || undefined,
-    news: news.length > 0 ? news : undefined
+    news: news.length > 0 ? news : undefined,
+    financeUpdate: financeUpdate || undefined
   };
 }
 
@@ -605,6 +640,34 @@ export function extractFullTeamName(text: string): string | null {
  * @param text 사용자 입력 또는 AI 응답 텍스트
  * @returns 추출된 구단 이름 (없으면 null)
  */
+/**
+ * 구단명에서 지역명을 제거하고 팀 애칭만 반환합니다
+ * 예: "수원 KT 위즈" -> "KT 위즈", "서울 LG 트윈스" -> "LG 트윈스"
+ * @param teamName 전체 구단명 (지역명 포함 가능)
+ * @returns 지역명이 제거된 팀 애칭
+ */
+export function getTeamNickname(teamName: string | null | undefined): string {
+  if (!teamName) return '우리 팀';
+  
+  // 한국 주요 도시명 패턴 (시, 도, 특별시, 광역시 등 제거)
+  const cityPatterns = [
+    /^(서울|부산|대구|인천|광주|대전|울산|세종|수원|성남|고양|용인|부천|청주|천안|전주|포항|창원|김해|제주|수원시|성남시|고양시|용인시|부천시|청주시|천안시|전주시|포항시|창원시|김해시|제주시|제주특별자치도)\s+/i,
+  ];
+  
+  // 도시명 제거
+  let nickname = teamName.trim();
+  for (const pattern of cityPatterns) {
+    nickname = nickname.replace(pattern, '');
+  }
+  
+  // 빈 문자열이면 원본 반환
+  if (!nickname || nickname.trim().length === 0) {
+    return teamName;
+  }
+  
+  return nickname.trim();
+}
+
 export function extractTeamName(text: string): string | null {
   // 먼저 전체 구단명(연고지 + 팀 이름) 추출 시도
   const fullName = extractFullTeamName(text);

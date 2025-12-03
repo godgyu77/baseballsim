@@ -68,7 +68,7 @@ function MessageBubble({
         </div>
 
         {/* 게임스러운 본문 */}
-        <div className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 text-sm sm:text-base md:text-lg text-gray-800 bg-white/50" style={{ fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif' }}>
+        <div className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 text-base sm:text-base md:text-lg text-gray-800 bg-white/50" style={{ fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif' }}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={useMemo(() => ({
@@ -121,7 +121,10 @@ function MessageBubble({
                       overflowX: 'auto', 
                       overflowY: 'visible', 
                       display: 'block',
-                      position: 'relative'
+                      position: 'relative',
+                      scrollBehavior: 'smooth',
+                      scrollbarWidth: 'thin',
+                      scrollbarColor: '#10b981 rgba(0, 0, 0, 0.1)'
                     }}
                   >
                     <div 
@@ -303,7 +306,7 @@ function MessageBubble({
               },
               // 일반 텍스트 스타일
               p: ({ children }) => (
-                <p className="mb-3 last:mb-0 whitespace-pre-wrap leading-relaxed text-gray-800 break-words text-sm sm:text-base md:text-lg">
+                <p className="mb-3 last:mb-0 whitespace-pre-wrap leading-relaxed text-gray-800 break-words text-base sm:text-base md:text-lg">
                   {children}
                 </p>
               ),
@@ -326,12 +329,12 @@ function MessageBubble({
               },
               // 리스트
               ul: ({ children }) => (
-                <ul className="list-disc list-inside my-3 space-y-2 text-gray-700 text-sm sm:text-base md:text-lg">
+                <ul className="list-disc list-inside my-3 space-y-2 text-gray-700 text-base sm:text-base md:text-lg">
                   {children}
                 </ul>
               ),
               ol: ({ children }) => (
-                <ol className="list-decimal list-inside my-3 space-y-2 text-gray-700 text-sm sm:text-base md:text-lg">
+                <ol className="list-decimal list-inside my-3 space-y-2 text-gray-700 text-base sm:text-base md:text-lg">
                   {children}
                 </ol>
               ),

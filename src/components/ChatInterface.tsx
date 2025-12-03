@@ -5,18 +5,17 @@ import { getGeminiModel } from '../lib/gemini';
 import GameHeader from './GameHeader';
 import MessageBubble from './MessageBubble';
 import LoadingOverlay from './LoadingOverlay';
-import EventModal, { Player } from './EventModal';
 import NegotiationInput from './NegotiationInput';
 import RandomEventModal from './RandomEventModal';
 import FacilityManagement from './FacilityManagement';
 import OptionsModal from './OptionsModal';
 import NewsSidebar, { NewsItem } from './NewsSidebar';
-import { parseAIResponse, extractDate, extractBudget, extractTeamName, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo } from '../lib/utils';
+import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo } from '../lib/utils';
 import { Team } from '../constants/TeamData';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
 import { createInitialFacilityState, FACILITY_DEFINITIONS } from '../constants/Facilities';
-import { Difficulty, GAME_CONFIG, applyIncomeMultiplier } from '../constants/GameConfig';
+import { Difficulty } from '../constants/GameConfig';
 
 interface Message {
   text: string;
@@ -58,7 +57,6 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     teamName: undefined, // 초기값 없음
   });
   const [gamePhase, setGamePhase] = useState<GamePhase>('MAIN_GAME');
-  const [guiEvent, setGuiEvent] = useState<GUIEvent | null>(null);
   const [negotiationPlayer, setNegotiationPlayer] = useState<string | null>(null);
   const [isModelReady, setIsModelReady] = useState(false);
   const [randomEvent, setRandomEvent] = useState<RandomEvent | null>(null);
@@ -191,6 +189,20 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
             }
           }
           
+          // FINANCE_UPDATE 태그 처리 (FA 보상금 등 자금 변동)
+          if (parsed.financeUpdate) {
+            const { amount, reason } = parsed.financeUpdate;
+            console.log(`[자금 변동] ${reason}: ${amount > 0 ? '+' : ''}${(amount / 100000000).toFixed(1)}억 원`);
+            setGameState(prev => {
+              if (prev.budget !== null) {
+                const newBudget = prev.budget + amount;
+                console.log(`[자금 변동] ${(prev.budget / 100000000).toFixed(1)}억 원 → ${(newBudget / 100000000).toFixed(1)}억 원`);
+                return { ...prev, budget: Math.max(0, newBudget) };
+              }
+              return prev;
+            });
+          }
+
           // NEWS 태그 처리 (뉴스 사이드바에 추가)
           if (parsed.news && parsed.news.length > 0) {
             setNewsItems(prev => [...prev, ...parsed.news!]);
@@ -309,9 +321,9 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
         setLoadingStatusText(undefined);
         setIsLoading(false);
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error:', error);
-      const errorMessage = error?.message || error?.toString() || '알 수 없는 오류';
+      const errorMessage = error instanceof Error ? error.message : String(error) || '알 수 없는 오류';
       setMessages((prev) => [
         ...prev,
         {
@@ -525,6 +537,15 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           ? 'C유형: 시스템/재건 (Rebuilder)'
           : 'D유형: 의리의 대부 (The Godfather)';
         
+        // 시설 정보 문자열 생성
+        const facilityInfo = `**[현재 시설 레벨]**
+- 훈련장: Lv.${facilities.training.level} (경험치 획득량 +${facilities.training.level * 10}%)
+- 메디컬 센터: Lv.${facilities.medical.level} (부상 확률 -${facilities.medical.level * 5}%, 회복 속도 +${facilities.medical.level * 10}%)
+- 마케팅 팀: Lv.${facilities.marketing.level} (경기당 수익 +${facilities.marketing.level * 5}%, 후원금 +${facilities.marketing.level * 3}%)
+- 스카우트 팀: Lv.${facilities.scouting.level} (높은 등급 선수 발견 확률 +${facilities.scouting.level * 8}%)
+
+위 시설 레벨에 따라 게임 로직(부상 회복 속도, 경험치 획득량, 수익 등)을 적용해주세요.`;
+
         teamMessage = `✨ 신생 구단 창단 (11구단)을 선택했습니다. 
 
 **[구단 정보]**
@@ -536,8 +557,19 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
 난이도: ${difficultyMode} (${difficultyCode})
 ${difficultyConfig}
 
-이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 신생 구단 창단 프로세스를 시작해주세요.`;
+이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 신생 구단 창단 프로세스를 시작해주세요.
+
+${facilityInfo}`;
       } else {
+        // 시설 정보 문자열 생성
+        const facilityInfo = `**[현재 시설 레벨]**
+- 훈련장: Lv.${facilities.training.level} (경험치 획득량 +${facilities.training.level * 10}%)
+- 메디컬 센터: Lv.${facilities.medical.level} (부상 확률 -${facilities.medical.level * 5}%, 회복 속도 +${facilities.medical.level * 10}%)
+- 마케팅 팀: Lv.${facilities.marketing.level} (경기당 수익 +${facilities.marketing.level * 5}%, 후원금 +${facilities.marketing.level * 3}%)
+- 스카우트 팀: Lv.${facilities.scouting.level} (높은 등급 선수 발견 확률 +${facilities.scouting.level * 8}%)
+
+위 시설 레벨에 따라 게임 로직(부상 회복 속도, 경험치 획득량, 수익 등)을 적용해주세요.`;
+
         // 프롬프트 Step 2: 구단 선택 완료, Step 3으로 진행
         teamMessage = `${selectedTeam.fullName}을 선택했습니다. 
 
@@ -545,7 +577,9 @@ ${difficultyConfig}
 난이도: ${difficultyMode} (${difficultyCode})
 ${difficultyConfig}
 
-이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 Step 3: 데이터 초기화 및 게임을 시작해주세요.`;
+이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 Step 3: 데이터 초기화 및 게임을 시작해주세요.
+
+${facilityInfo}`;
       }
       // 약간의 지연을 두어 모든 초기화가 완료되도록 함
       const timer = setTimeout(() => {
@@ -636,9 +670,18 @@ ${difficultyConfig}
         console.log('[자금 파싱] 텍스트에서 자금 추출:', extractedBudget);
       }
       
-      if (extractedBudget !== null && extractedBudget > 0) { // 0보다 큰 값만 업데이트
-        console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget.toLocaleString('ko-KR') + '원');
-        setGameState(prev => ({ ...prev, budget: extractedBudget }));
+      // 자금 업데이트: 시설 업그레이드 등으로 로컬에서 차감한 경우, AI 응답의 자금이 더 크면 업데이트하지 않음
+      if (extractedBudget !== null && extractedBudget > 0) {
+        setGameState(prev => {
+          // 로컬 자금이 AI 응답 자금보다 작으면 (차감이 발생한 경우) 로컬 자금 유지
+          if (prev.budget !== null && prev.budget < extractedBudget) {
+            console.log('[자금 파싱] ⚠️ 로컬 자금이 더 작음 (차감 발생). 로컬 자금 유지:', prev.budget.toLocaleString('ko-KR') + '원');
+            return prev;
+          }
+          // 그 외의 경우 (AI 응답이 더 작거나 같으면) AI 응답으로 업데이트
+          console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget.toLocaleString('ko-KR') + '원');
+          return { ...prev, budget: extractedBudget };
+        });
       } else {
         console.log('[자금 파싱] ❌ 자금 추출 실패 또는 0원');
       }
@@ -660,8 +703,9 @@ ${difficultyConfig}
   const handleOptionClick = useCallback((value: string) => {
     playSound('click');
     
-    // "다음 날로 진행" 같은 날짜 진행 명령인지 확인 (더 정확한 패턴 매칭)
+    // "다음 이벤트까지 진행" 또는 "다음 날로 진행" 같은 날짜 진행 명령인지 확인 (더 정확한 패턴 매칭)
     const dateProgressPatterns = [
+      /다음\s*이벤트\s*까지\s*진행/,
       /다음\s*(날|일|날짜|하루)/,
       /(하루|날짜|일정)\s*(진행|넘기|건너뛰)/,
       /(진행|넘기|건너뛰)\s*(하루|날짜|일정)/,
@@ -773,21 +817,47 @@ ${difficultyConfig}
       return;
     }
     
+    const newBudget = gameState.budget - upgradeCost;
+    const newLevel = facility.level + 1;
+    
+    // 로컬 상태 업데이트
     setGameState((prev) => ({
       ...prev,
-      budget: prev.budget! - upgradeCost,
+      budget: newBudget,
     }));
     
     setFacilities((prev) => ({
       ...prev,
       [type]: {
         ...prev[type],
-        level: prev[type].level + 1,
+        level: newLevel,
       },
     }));
     
     playSound('coin');
-    console.log(`[시설 업그레이드] ${definition.name} Lv.${facility.level} → Lv.${facility.level + 1} (비용: ${(upgradeCost / 100000000).toFixed(1)}억 원)`);
+    console.log(`[시설 업그레이드] ${definition.name} Lv.${facility.level} → Lv.${newLevel} (비용: ${(upgradeCost / 100000000).toFixed(1)}억 원)`);
+    
+    // AI에게 시설 업그레이드 및 자금 차감 정보 전달
+    const facilityMessage = `[시설 업그레이드 완료]
+
+${definition.name}을(를) Lv.${facility.level}에서 Lv.${newLevel}로 업그레이드했습니다.
+
+**[자금 변동]**
+- 업그레이드 비용: ${(upgradeCost / 100000000).toFixed(1)}억 원
+- 업그레이드 전 자금: ${(gameState.budget / 100000000).toFixed(1)}억 원
+- 업그레이드 후 자금: ${(newBudget / 100000000).toFixed(1)}억 원
+
+**[시설 효과]**
+${definition.effect(newLevel).description}
+
+위 자금 변동을 반영하여 [STATUS] 태그에 업데이트된 자금을 표시해주세요.`;
+    
+    // 약간의 지연을 두어 상태 업데이트가 완료된 후 메시지 전송
+    setTimeout(() => {
+      if (handleSendRef.current) {
+        handleSendRef.current(facilityMessage);
+      }
+    }, 100);
   };
 
   // 저장 기능
@@ -969,15 +1039,6 @@ ${difficultyConfig}
     }
   }, [playSound]);
 
-  // GUI 이벤트 핸들러
-  const handlePlayerSelect = useCallback((player: Player) => {
-    playSound('coin');
-    const message = `${player.name} 선수 선택`;
-    setGamePhase('NEGOTIATION');
-    setNegotiationPlayer(player.name);
-    handleSend(message);
-  }, [handleSend, playSound]);
-
   const handleNegotiationSubmit = useCallback((amount: number) => {
     setNegotiationPlayer((prevPlayer) => {
       if (prevPlayer) {
@@ -989,11 +1050,6 @@ ${difficultyConfig}
     setGamePhase('MAIN_GAME');
   }, [handleSend]);
 
-  const handleEventModalClose = useCallback(() => {
-    setGamePhase('MAIN_GAME');
-    setGuiEvent(null);
-  }, []);
-
   // 옵션 모달 닫기 핸들러
   const handleOptionsModalClose = () => {
     setIsOptionsModalOpen(false);
@@ -1001,26 +1057,28 @@ ${difficultyConfig}
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#Fdfbf7]">
+    <div className="flex flex-col h-full w-full bg-[#Fdfbf7] overflow-hidden">
       {/* 헤더 - 상태바 */}
-      <GameHeader 
-        teamName={
-          selectedTeam.id === 'expansion' 
-            ? (expansionTeamData?.teamName || selectedTeam.fullName)
-            : (gameState.teamName || selectedTeam.fullName)
-        }
-        budget={gameState.budget}
-        date={gameState.date}
-        season="2026 시즌"
-        difficulty={difficulty}
-        salaryCapUsage={gameState.salaryCapUsage}
-        onApiKeyClick={onResetApiKey}
-        onSaveClick={handleSave}
-        onLoadClick={handleLoad}
-      />
+      <div className="flex-none pt-[env(safe-area-inset-top)]">
+        <GameHeader 
+          teamName={
+            selectedTeam.id === 'expansion' 
+              ? (expansionTeamData?.teamName || selectedTeam.fullName)
+              : (gameState.teamName || selectedTeam.fullName)
+          }
+          budget={gameState.budget}
+          date={gameState.date}
+          season="2026 시즌"
+          difficulty={difficulty}
+          salaryCapUsage={gameState.salaryCapUsage}
+          onApiKeyClick={onResetApiKey}
+          onSaveClick={handleSave}
+          onLoadClick={handleLoad}
+        />
+      </div>
 
       {/* 메인 - 채팅 영역 */}
-      <div className="flex-1 overflow-y-auto px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 lg:py-6 overscroll-contain">
+      <div className="flex-1 overflow-y-auto px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 lg:py-6 overscroll-contain min-h-0">
         <div className="max-w-5xl mx-auto w-full">
           {messages.map((msg, idx) => (
             <MessageBubble
@@ -1034,7 +1092,7 @@ ${difficultyConfig}
       </div>
 
       {/* 푸터 - 입력 영역 */}
-      <div className="border-t-2 border-baseball-green/20 bg-gradient-to-b from-gray-50 to-white shadow-2xl">
+      <div className="flex-none border-t-2 border-baseball-green/20 bg-gradient-to-b from-gray-50 to-white shadow-2xl z-40 pb-[env(safe-area-inset-bottom)]">
         {/* 선택지 버튼 패널 제거됨 - 모달로 대체 */}
 
         {/* 입력 폼 */}

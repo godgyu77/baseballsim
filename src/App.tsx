@@ -22,6 +22,7 @@ function App() {
   const [shouldLoadGame, setShouldLoadGame] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
   const [expansionTeamData, setExpansionTeamData] = useState<{ city: string; teamName: string; ownerType: OwnerType } | null>(null);
+  const [isGameInitializing, setIsGameInitializing] = useState(false);
 
   useEffect(() => {
     // 로컬 스토리지에서 API 키 확인
@@ -110,12 +111,19 @@ function App() {
     setScreenView('game');
   };
 
-  const handleStartNewGame = () => {
+  const handleStartNewGame = (initialResponse?: string) => {
     // 저장된 게임 데이터 삭제
     localStorage.removeItem(SAVE_KEY);
     setShouldLoadGame(false);
     setSelectedTeam(null);
     setDifficulty(null);
+    setIsGameInitializing(false);
+    
+    // 초기 응답이 있으면 저장 (나중에 사용할 수 있도록)
+    if (initialResponse) {
+      console.log('게임 초기화 완료:', initialResponse.substring(0, 100) + '...');
+    }
+    
     setScreenView('difficulty_select');
   };
 
@@ -125,15 +133,18 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F7FA] px-0 sm:px-2 overflow-x-hidden">
+    <div className="h-full w-full bg-[#F5F7FA] px-0 sm:px-2 overflow-x-hidden overflow-y-hidden">
       <AnimatePresence mode="wait">
         {showApiKeyModal ? (
           <ApiKeyModal key="api-key-modal" onApiKeySet={handleApiKeySet} />
         ) : screenView === 'start' ? (
           <StartScreen
             key="start-screen"
+            apiKey={apiKey}
             onLoadGame={handleLoadGame}
             onStartNew={handleStartNewGame}
+            isLoading={isGameInitializing}
+            setIsLoading={setIsGameInitializing}
           />
         ) : screenView === 'difficulty_select' ? (
           <DifficultyModal
