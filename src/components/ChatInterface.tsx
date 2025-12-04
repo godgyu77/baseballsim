@@ -1,24 +1,28 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Building2, Newspaper, ClipboardList } from 'lucide-react';
+import { Send, Building2, Newspaper, ClipboardList, Trophy, Receipt, MonitorPlay } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { getGeminiModel } from '../lib/gemini';
+import { getGeminiModel, initializeGameWithData } from '../lib/gemini';
 import GameHeader from './GameHeader';
 import MessageBubble from './MessageBubble';
 import LoadingOverlay from './LoadingOverlay';
-import EventModal, { Player } from './EventModal';
 import NegotiationInput from './NegotiationInput';
 import RandomEventModal from './RandomEventModal';
 import FacilityManagement from './FacilityManagement';
 import OptionsModal from './OptionsModal';
 import NewsSidebar, { NewsItem } from './NewsSidebar';
-import SettingsModal from './SettingsModal';
-import { parseAIResponse, extractDate, extractBudget, extractTeamName, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo } from '../lib/utils';
+import TransactionModal from './TransactionModal';
+import StandingsModal from './StandingsModal';
+import GameResultModal from './GameResultModal';
+import { useToast } from '../context/ToastContext';
+import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo, Transaction, validateBudgetIntegrity, Player, validateRosterIntegrity, extractPlayerNamesFromInitialData, GameResult, TeamRecord } from '../lib/utils';
 import { filterProtectedPlayers, validateDraftPicks, updatePlayerTeamAffiliation, sortDraftOrder, createDraftPool, DraftPlayer, ProtectedPlayer, TeamRank } from '../lib/draftUtils';
+import { getInitialBudget } from '../constants/GameConfig';
 import { Team } from '../constants/TeamData';
+import { KBO_INITIAL_DATA } from '../constants/prompts';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
 import { createInitialFacilityState, FACILITY_DEFINITIONS } from '../constants/Facilities';
-import { Difficulty, GAME_CONFIG, applyIncomeMultiplier } from '../constants/GameConfig';
+import { Difficulty } from '../constants/GameConfig';
 
 interface Message {
   text: string;
@@ -60,7 +64,6 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     teamName: undefined, // 초기값 없음
   });
   const [gamePhase, setGamePhase] = useState<GamePhase>('MAIN_GAME');
-  const [guiEvent, setGuiEvent] = useState<GUIEvent | null>(null);
   const [negotiationPlayer, setNegotiationPlayer] = useState<string | null>(null);
   const [isModelReady, setIsModelReady] = useState(false);
   const [randomEvent, setRandomEvent] = useState<RandomEvent | null>(null);
@@ -75,6 +78,18 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
   const [isNewsOpen, setIsNewsOpen] = useState(false);
   const [readNewsCount, setReadNewsCount] = useState(0); // 읽은 뉴스 개수 추적
   const [hasCheckedLoadGame, setHasCheckedLoadGame] = useState(false); // 불러오기 시 옵션 체크 플래그
+  // [Money-Validation] 자금 무결성 검증 로직 추가 - 거래 내역 관리
+  const [transactionHistory, setTransactionHistory] = useState<Transaction[]>([]);
+  // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 상태 관리
+  const [currentRoster, setCurrentRoster] = useState<Player[]>([]); // 현재 로스터 상태
+  // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 상태 관리
+  const [leagueStandings, setLeagueStandings] = useState<Record<string, TeamRecord>>({}); // 팀별 전적 맵 (팀 이름 -> 전적)
+  const [lastGameResult, setLastGameResult] = useState<GameResult | null>(null); // 최근 경기 결과
+  // 모달 상태 관리
+  const [isTransactionOpen, setIsTransactionOpen] = useState(false);
+  const [isStandingsOpen, setIsStandingsOpen] = useState(false);
+  const [isResultOpen, setIsResultOpen] = useState(false);
+  const { showToast } = useToast(); // Toast 알림 훅
   const isLoadProcessingRef = useRef(false); // 불러오기 중복 방지 플래그
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInstanceRef = useRef<any>(null);
@@ -112,17 +127,32 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       // 채팅 인스턴스가 없으면 새로 생성
       // messagesRef를 사용하여 최신 메시지 목록 참조 (방금 추가한 사용자 메시지 포함)
       if (!chatInstanceRef.current) {
-        // 사용자 메시지를 제외한 히스토리 생성 (방금 추가한 메시지 제외)
-        const currentMessages = [...messagesRef.current, { text: userMessage, isUser: true }];
-        const history = currentMessages.length > 1 
-          ? currentMessages.slice(0, -1).map(msg => ({
+        // [CRITICAL FIX] history 생성 시 주의:
+        // 1. initializeGameWithData 이후에는 messagesRef가 초기화되어 있으므로 빈 배열로 시작
+        // 2. 첫 번째 메시지는 반드시 user role이어야 함 (API 규칙)
+        // 3. messagesRef.current에 AI 응답이 먼저 있으면 제거하고 user 메시지부터 시작
+        const currentMessages = messagesRef.current;
+        
+        // AI 응답이 첫 번째로 오는 경우 제거 (API 규칙 위반 방지)
+        const filteredMessages = currentMessages.length > 0 && !currentMessages[0].isUser
+          ? currentMessages.filter((_, idx) => idx === 0 ? false : true) // 첫 번째 AI 메시지 제거
+          : currentMessages;
+        
+        // 사용자 메시지를 제외한 히스토리 생성 (방금 추가한 사용자 메시지 제외)
+        const history = filteredMessages.length > 0
+          ? filteredMessages.map(msg => ({
               role: msg.isUser ? 'user' : 'model',
               parts: [{ text: msg.text }],
             }))
           : [];
 
+        // [CRITICAL] history의 첫 번째 항목이 'model'이면 제거 (API 규칙 위반 방지)
+        const safeHistory = history.length > 0 && history[0].role === 'model'
+          ? history.slice(1) // 첫 번째 model 메시지 제거
+          : history;
+
         chatInstanceRef.current = modelRef.current.startChat({
-          history: history,
+          history: safeHistory, // 안전한 history 사용
         });
       }
 
@@ -179,13 +209,40 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
               setGameState(prev => ({ ...prev, date: parsed.status!.date! }));
             }
             if (parsed.status.budget) {
+              // [Money-Validation] 자금 무결성 검증 로직 추가
               // "50억 원" 또는 "-30.0억 원" 형식에서 숫자 추출 (마이너스 값도 처리)
               const budgetMatch = parsed.status.budget.match(/(-?[0-9,.]+)\s*억/i);
               if (budgetMatch) {
                 const amount = parseFloat(budgetMatch[1].replace(/,/g, ''));
                 if (!isNaN(amount)) {
-                  // 마이너스 값도 허용 (부채 상태)
-                  setGameState(prev => ({ ...prev, budget: Math.floor(amount * 100000000) }));
+                  const aiReportedBudget = Math.floor(amount * 100000000); // 원 단위로 변환
+                  
+                  setGameState(prev => {
+                    // transactionHistory의 마지막 잔액과 비교하여 검증
+                    const lastTransaction = transactionHistory[transactionHistory.length - 1];
+                    const clientCalculatedBudget = lastTransaction ? lastTransaction.balanceAfter : (prev.budget || 0);
+                    
+                    // 자금 무결성 검증
+                    const validation = validateBudgetIntegrity(aiReportedBudget, clientCalculatedBudget);
+                    if (!validation.isValid && validation.warning) {
+                      console.warn(validation.warning);
+                    }
+                    
+                    // 거래 내역에 기록
+                    const transaction: Transaction = {
+                      id: `ai-report-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                      date: parsed.status!.date || new Date().toISOString(),
+                      amount: aiReportedBudget - clientCalculatedBudget, // 변동 금액
+                      category: 'AI_REPORT',
+                      description: `AI 응답: ${parsed.status.budget}`,
+                      balanceAfter: aiReportedBudget,
+                    };
+                    
+                    setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+                    
+                    // 마이너스 값도 허용 (부채 상태)
+                    return { ...prev, budget: aiReportedBudget };
+                  });
                 }
               }
             }
@@ -194,9 +251,204 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
             }
           }
           
+          // FINANCE_UPDATE 태그 처리 (FA 보상금 등 자금 변동)
+          if (parsed.financeUpdate) {
+            // [Money-Validation] 자금 무결성 검증 로직 추가
+            const { amount, reason } = parsed.financeUpdate;
+            console.log(`[자금 변동] ${reason}: ${amount > 0 ? '+' : ''}${(amount / 100000000).toFixed(1)}억 원`);
+            setGameState(prev => {
+              if (prev.budget !== null) {
+                const newBudget = Math.max(0, prev.budget + amount);
+                console.log(`[자금 변동] ${(prev.budget / 100000000).toFixed(1)}억 원 → ${(newBudget / 100000000).toFixed(1)}억 원`);
+                
+                // 거래 내역에 기록
+                const transaction: Transaction = {
+                  id: `finance-update-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                  date: parsed.status?.date || new Date().toISOString(),
+                  amount: amount,
+                  category: 'FINANCE_UPDATE',
+                  description: reason,
+                  balanceAfter: newBudget,
+                };
+                
+                setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+                
+                // Toast 알림: 자금 변동
+                if (amount > 0) {
+                  showToast(`${(amount / 100000000).toFixed(1)}억 원 수입이 발생했습니다`, 'success');
+                } else {
+                  showToast(`${Math.abs(amount / 100000000).toFixed(1)}억 원을 지출했습니다`, 'warning');
+                }
+                
+                return { ...prev, budget: newBudget };
+              }
+              return prev;
+            });
+          }
+
           // NEWS 태그 처리 (뉴스 사이드바에 추가)
           if (parsed.news && parsed.news.length > 0) {
             setNewsItems(prev => [...prev, ...parsed.news!]);
+          }
+
+          // [Roster-Validation] 로스터 무결성 검사 추가
+          // [ROSTER] 태그에서 로스터 데이터가 있는 경우 검증 및 업데이트
+          if (parsed.roster && Array.isArray(parsed.roster) && parsed.roster.length > 0) {
+            // 초기 로스터 출력 시 InitialData.ts와 비교 검증 (currentRoster가 비어있을 때만)
+            const isInitialRoster = currentRoster.length === 0;
+            // InitialData.ts의 팀 이름 형식과 매칭 (예: "한화 이글스", "KT 위즈" 등)
+            const teamNameForValidation = selectedTeam.fullName; // "한화 이글스", "KT 위즈" 등
+            const initialDataPlayerNames = isInitialRoster 
+              ? extractPlayerNamesFromInitialData(KBO_INITIAL_DATA, teamNameForValidation)
+              : undefined;
+            
+            // 로스터 무결성 검증
+            const validation = validateRosterIntegrity(
+              parsed.roster, 
+              currentRoster,
+              initialDataPlayerNames
+            );
+            
+            if (!validation.isValid) {
+              // 검증 실패: 경고 로그 출력 및 기존 로스터 유지 (Fail-Safe)
+              console.error('[Roster-Validation] AI 데이터 오류 감지: 로스터 업데이트를 건너뜁니다.');
+              console.error('[Roster-Validation] 검증 실패 사유:');
+              validation.errors.forEach((error, index) => {
+                console.error(`  ${index + 1}. ${error}`);
+              });
+              if (validation.warnings.length > 0) {
+                console.warn('[Roster-Validation] 경고 사항:');
+                validation.warnings.forEach((warning, index) => {
+                  console.warn(`  ${index + 1}. ${warning}`);
+                });
+              }
+              // 기존 로스터 상태 유지 (업데이트 방지)
+            } else {
+              // 검증 성공: 로스터 업데이트
+              if (validation.warnings.length > 0) {
+                console.warn('[Roster-Validation] 경고 사항 (업데이트는 진행):');
+                validation.warnings.forEach((warning, index) => {
+                  console.warn(`  ${index + 1}. ${warning}`);
+                });
+              }
+              setCurrentRoster(parsed.roster);
+              console.log(`[Roster-Validation] ✅ 로스터 업데이트 완료: ${parsed.roster.length}명`);
+            }
+          }
+
+          // GUI_EVENT에서 로스터 데이터가 있는 경우 검증 (향후 확장용)
+          if (parsed.guiEvent && parsed.guiEvent.type === 'RECRUIT' && parsed.guiEvent.candidates) {
+            // 후보 선수 목록이 있는 경우 (드래프트, FA 등)
+            // 현재는 후보 목록이므로 로스터 검증은 생략
+            // 향후 실제 로스터 업데이트 시 검증 로직 적용
+          }
+
+          // [Sim-Engine] 경기 결과 파싱 및 전적 반영
+          if (parsed.gameResults && parsed.gameResults.length > 0) {
+            // 최근 경기 결과 저장 (첫 번째 경기 또는 우리 팀 경기)
+            const myTeamGame = parsed.gameResults.find(r => r.isMyTeamGame);
+            if (myTeamGame) {
+              setLastGameResult(myTeamGame);
+            } else if (parsed.gameResults.length > 0) {
+              setLastGameResult(parsed.gameResults[0]);
+            }
+            
+            // Toast 알림: 경기 결과 도착
+            showToast('경기 결과가 도착했습니다', 'info');
+            
+            setLeagueStandings(prevStandings => {
+              const newStandings = { ...prevStandings };
+              let myTeamWins = 0;
+              let myTeamLosses = 0;
+              let myTeamDraws = 0;
+
+              parsed.gameResults!.forEach((result) => {
+                // 홈팀 전적 업데이트
+                if (!newStandings[result.homeTeam]) {
+                  newStandings[result.homeTeam] = {
+                    wins: 0,
+                    losses: 0,
+                    draws: 0,
+                    gamesPlayed: 0,
+                  };
+                }
+
+                // 원정팀 전적 업데이트
+                if (!newStandings[result.awayTeam]) {
+                  newStandings[result.awayTeam] = {
+                    wins: 0,
+                    losses: 0,
+                    draws: 0,
+                    gamesPlayed: 0,
+                  };
+                }
+
+                // 승/패/무 업데이트
+                if (result.winner === 'home') {
+                  newStandings[result.homeTeam].wins++;
+                  newStandings[result.awayTeam].losses++;
+                  
+                  // 우리 팀 경기인 경우 전적 추적
+                  if (result.isMyTeamGame) {
+                    if (result.homeTeam === selectedTeam.name || result.homeTeam === selectedTeam.fullName) {
+                      myTeamWins++;
+                    } else {
+                      myTeamLosses++;
+                    }
+                  }
+                } else if (result.winner === 'away') {
+                  newStandings[result.homeTeam].losses++;
+                  newStandings[result.awayTeam].wins++;
+                  
+                  // 우리 팀 경기인 경우 전적 추적
+                  if (result.isMyTeamGame) {
+                    if (result.awayTeam === selectedTeam.name || result.awayTeam === selectedTeam.fullName) {
+                      myTeamWins++;
+                    } else {
+                      myTeamLosses++;
+                    }
+                  }
+                } else {
+                  // 무승부
+                  newStandings[result.homeTeam].draws++;
+                  newStandings[result.awayTeam].draws++;
+                  
+                  if (result.isMyTeamGame) {
+                    myTeamDraws++;
+                  }
+                }
+
+                // 경기 수 업데이트
+                newStandings[result.homeTeam].gamesPlayed++;
+                newStandings[result.awayTeam].gamesPlayed++;
+              });
+
+              // 승률 계산
+              Object.keys(newStandings).forEach(teamName => {
+                const record = newStandings[teamName];
+                if (record.gamesPlayed > 0) {
+                  record.winPercentage = record.wins / record.gamesPlayed;
+                } else {
+                  record.winPercentage = 0;
+                }
+              });
+
+              // UI Feedback: 경기 결과가 파싱되면 사용자에게 알림
+              if (myTeamWins > 0 || myTeamLosses > 0 || myTeamDraws > 0) {
+                const myTeamRecord = newStandings[selectedTeam.name] || newStandings[selectedTeam.fullName];
+                if (myTeamRecord) {
+                  console.log(
+                    `[Sim-Engine] 경기 결과가 반영되었습니다. ` +
+                    `현재 전적: ${myTeamRecord.wins}승 ${myTeamRecord.losses}패 ${myTeamRecord.draws}무 ` +
+                    `(승률: ${(myTeamRecord.winPercentage! * 100).toFixed(3)}%)`
+                  );
+                }
+              } else {
+                console.log(`[Sim-Engine] 경기 결과가 반영되었습니다. (${parsed.gameResults.length}경기 처리)`);
+              }
+
+              return newStandings;
+            });
           }
           
           // 옵션이 있으면 플로팅 버튼만 표시 (모달은 즉시 띄우지 않음)
@@ -424,9 +676,9 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
         setLoadingStatusText(undefined);
         setIsLoading(false);
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error:', error);
-      const errorMessage = error?.message || error?.toString() || '알 수 없는 오류';
+      const errorMessage = error instanceof Error ? error.message : String(error) || '알 수 없는 오류';
       setMessages((prev) => [
         ...prev,
         {
@@ -494,6 +746,18 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                 }
                 if (parsed.readNewsCount !== undefined) {
                   setReadNewsCount(parsed.readNewsCount);
+                }
+                // [Money-Validation] 자금 무결성 검증 로직 추가 - 거래 내역 복원
+                if (parsed.transactionHistory && Array.isArray(parsed.transactionHistory)) {
+                  setTransactionHistory(parsed.transactionHistory);
+                }
+                // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
+                if (parsed.currentRoster && Array.isArray(parsed.currentRoster)) {
+                  setCurrentRoster(parsed.currentRoster);
+                }
+                // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
+                if (parsed.leagueStandings && typeof parsed.leagueStandings === 'object') {
+                  setLeagueStandings(parsed.leagueStandings);
                 }
                 
                 // 모델에 메시지 히스토리 복원 (API 연결 유지)
@@ -607,40 +871,76 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     pendingOptionsRef.current = pendingOptions;
   }, [pendingOptions]);
 
+  // 게임 초기화 플래그 (중복 호출 방지)
+  const isInitializingRef = useRef(false);
+
   useEffect(() => {
     const savedData = localStorage.getItem(SAVE_KEY);
     const hasSavedData = savedData && JSON.parse(savedData).messages?.length > 0;
     
-    // 새 게임 시작 시: 저장된 데이터가 없으면 초기 메시지 전송
-    if (selectedTeam && messages.length === 0 && isModelReady && modelRef.current && !hasSavedData) {
+    // 새 게임 시작 시: 저장된 데이터가 없으면 initializeGameWithData 호출
+    if (selectedTeam && messages.length === 0 && isModelReady && modelRef.current && !hasSavedData && !isInitializingRef.current) {
+      isInitializingRef.current = true;
+      
+      // [CRITICAL FIX] 이전 메시지 및 채팅 인스턴스 완전 초기화
+      // 화면에 표시된 모든 메시지와 AI 응답을 제거하여 API 오류 방지
+      setMessages([]);
+      messagesRef.current = [];
+      chatInstanceRef.current = null; // 채팅 인스턴스 초기화 (새 세션 시작)
+      
       // 옵션 초기화 (일정 진행 버튼만 표시되도록) - 함수형 업데이트로 중복 방지
       setPendingOptions(prev => prev.length === 0 ? prev : []);
       setCurrentOptions(prev => prev.length === 0 ? prev : []);
       
-      // 신생 구단인 경우 특별 처리
-      // 프롬프트의 Step 2에 따라 난이도를 명시적으로 전달
-      const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
-      const difficultyCode = difficulty; // EASY, NORMAL, HELL
+      // 로딩 시작
+      setIsLoading(true);
+      setLoadingStatusText(undefined); // 롤링 텍스트 사용
       
-      // 난이도별 초기 자금 및 샐러리캡 정보를 명시적으로 전달 (AI가 변경하지 못하도록)
-      const difficultyConfig = difficulty === 'EASY' 
-        ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
-        : difficulty === 'NORMAL'
-        ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
-        : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
-      
-      let teamMessage: string;
-      if (selectedTeam.id === 'expansion') {
-        // 프롬프트 Step 2-1: 신생 구단 창단 절차 시작
-        const ownerTypeName = expansionTeamData?.ownerType === 'A' 
-          ? 'A유형: 성적 지상주의 (Win-Now)'
-          : expansionTeamData?.ownerType === 'B'
-          ? 'B유형: 비즈니스맨 (Profit-First)'
-          : expansionTeamData?.ownerType === 'C'
-          ? 'C유형: 시스템/재건 (Rebuilder)'
-          : 'D유형: 의리의 대부 (The Godfather)';
-        
-        teamMessage = `✨ 신생 구단 창단 (11구단)을 선택했습니다. 
+      // [FIX] Force Empty History to prevent API Error
+      // initializeGameWithData 호출 (팀 정보 및 난이도 포함)
+      // 주의: messages 상태를 인자로 넘기지 않음 (API 규칙 준수)
+      // initializeGameWithData 내부에서 history: []로 빈 세션을 강제로 시작하므로,
+      // 이전 UI에 있던 텍스트(Model 응답)는 절대 전달되지 않음
+      // 함수 시그니처에 _ignoredHistory가 있더라도 무시하고 빈 배열로 시작함
+      initializeGameWithData(apiKey, difficulty, selectedTeam)
+        .then((initialResponse) => {
+          // 초기 응답을 첫 메시지로 추가
+          setMessages([{ text: initialResponse, isUser: false }]);
+          messagesRef.current = [{ text: initialResponse, isUser: false }];
+          
+          // [CRITICAL FIX] initializeGameWithData는 독립적인 세션이므로
+          // 이후 handleSend에서 사용할 chatInstanceRef를 null로 유지하여
+          // 다음 메시지 전송 시 새 세션을 시작하도록 함
+          // (또는 initializeGameWithData의 세션을 재사용하려면 별도 관리 필요)
+          // 현재는 null로 두어 handleSend에서 새로 생성하도록 함
+          
+          // 신생 구단인 경우 추가 정보 전송
+          if (selectedTeam.id === 'expansion') {
+            const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
+            const difficultyCode = difficulty;
+            const difficultyConfig = difficulty === 'EASY' 
+              ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
+              : difficulty === 'NORMAL'
+              ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
+              : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
+            
+            const ownerTypeName = expansionTeamData?.ownerType === 'A' 
+              ? 'A유형: 성적 지상주의 (Win-Now)'
+              : expansionTeamData?.ownerType === 'B'
+              ? 'B유형: 비즈니스맨 (Profit-First)'
+              : expansionTeamData?.ownerType === 'C'
+              ? 'C유형: 시스템/재건 (Rebuilder)'
+              : 'D유형: 의리의 대부 (The Godfather)';
+            
+            const facilityInfo = `**[현재 시설 레벨]**
+- 훈련장: Lv.${facilities.training.level} (경험치 획득량 +${facilities.training.level * 10}%)
+- 메디컬 센터: Lv.${facilities.medical.level} (부상 확률 -${facilities.medical.level * 5}%, 회복 속도 +${facilities.medical.level * 10}%)
+- 마케팅 팀: Lv.${facilities.marketing.level} (경기당 수익 +${facilities.marketing.level * 5}%, 후원금 +${facilities.marketing.level * 3}%)
+- 스카우트 팀: Lv.${facilities.scouting.level} (높은 등급 선수 발견 확률 +${facilities.scouting.level * 8}%)
+
+위 시설 레벨에 따라 게임 로직(부상 회복 속도, 경험치 획득량, 수익 등)을 적용해주세요.`;
+
+            const teamMessage = `✨ 신생 구단 창단 (11구단)을 선택했습니다. 
 
 **[구단 정보]**
 연고지: ${expansionTeamData?.city || '미정'}
@@ -651,24 +951,58 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
 난이도: ${difficultyMode} (${difficultyCode})
 ${difficultyConfig}
 
-이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 신생 구단 창단 프로세스를 시작해주세요.`;
-      } else {
-        // 프롬프트 Step 2: 구단 선택 완료, Step 3으로 진행
-        teamMessage = `${selectedTeam.fullName}을 선택했습니다. 
+이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 신생 구단 창단 프로세스를 시작해주세요.
+
+${facilityInfo}`;
+            
+            setTimeout(() => {
+              if (handleSendRef.current) {
+                handleSendRef.current(teamMessage);
+              }
+            }, 500);
+          } else {
+            // 일반 구단인 경우 난이도 정보만 전송
+            const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
+            const difficultyCode = difficulty;
+            const difficultyConfig = difficulty === 'EASY' 
+              ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
+              : difficulty === 'NORMAL'
+              ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
+              : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
+            
+            const facilityInfo = `**[현재 시설 레벨]**
+- 훈련장: Lv.${facilities.training.level} (경험치 획득량 +${facilities.training.level * 10}%)
+- 메디컬 센터: Lv.${facilities.medical.level} (부상 확률 -${facilities.medical.level * 5}%, 회복 속도 +${facilities.medical.level * 10}%)
+- 마케팅 팀: Lv.${facilities.marketing.level} (경기당 수익 +${facilities.marketing.level * 5}%, 후원금 +${facilities.marketing.level * 3}%)
+- 스카우트 팀: Lv.${facilities.scouting.level} (높은 등급 선수 발견 확률 +${facilities.scouting.level * 8}%)
+
+위 시설 레벨에 따라 게임 로직(부상 회복 속도, 경험치 획득량, 수익 등)을 적용해주세요.`;
+
+            const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 
 
 **[난이도 설정 - 절대 변경 금지]**
 난이도: ${difficultyMode} (${difficultyCode})
 ${difficultyConfig}
 
-이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 Step 3: 데이터 초기화 및 게임을 시작해주세요.`;
-      }
-      // 약간의 지연을 두어 모든 초기화가 완료되도록 함
-      const timer = setTimeout(() => {
-        if (handleSendRef.current) {
-          handleSendRef.current(teamMessage);
-        }
-      }, 300);
-      return () => clearTimeout(timer);
+이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 Step 3: 데이터 초기화 및 게임을 시작해주세요.
+
+${facilityInfo}`;
+            
+            setTimeout(() => {
+              if (handleSendRef.current) {
+                handleSendRef.current(teamMessage);
+              }
+            }, 500);
+          }
+          
+          setIsLoading(false);
+        })
+        .catch((error) => {
+          console.error('게임 초기화 실패:', error);
+          alert('게임 초기화에 실패했습니다. 다시 시도해주세요.');
+          setIsLoading(false);
+          isInitializingRef.current = false;
+        });
     }
     
     // 불러오기 시: 저장된 메시지가 복원된 후, 마지막 AI 응답에 옵션이 없으면 초기 메시지 전송
@@ -751,9 +1085,42 @@ ${difficultyConfig}
         console.log('[자금 파싱] 텍스트에서 자금 추출:', extractedBudget);
       }
       
-      if (extractedBudget !== null && extractedBudget > 0) { // 0보다 큰 값만 업데이트
-        console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget.toLocaleString('ko-KR') + '원');
-        setGameState(prev => ({ ...prev, budget: extractedBudget }));
+      // [Money-Validation] 자금 무결성 검증 로직 추가
+      // 자금 업데이트: 시설 업그레이드 등으로 로컬에서 차감한 경우, AI 응답의 자금이 더 크면 업데이트하지 않음
+      if (extractedBudget !== null && extractedBudget > 0) {
+        setGameState(prev => {
+          // transactionHistory의 마지막 잔액과 비교하여 검증
+          const lastTransaction = transactionHistory[transactionHistory.length - 1];
+          const clientCalculatedBudget = lastTransaction ? lastTransaction.balanceAfter : (prev.budget || 0);
+          
+          // 자금 무결성 검증
+          const validation = validateBudgetIntegrity(extractedBudget!, clientCalculatedBudget);
+          if (!validation.isValid && validation.warning) {
+            console.warn(validation.warning);
+          }
+          
+          // 로컬 자금이 AI 응답 자금보다 작으면 (차감이 발생한 경우) 로컬 자금 유지
+          if (prev.budget !== null && prev.budget < extractedBudget!) {
+            console.log('[자금 파싱] ⚠️ 로컬 자금이 더 작음 (차감 발생). 로컬 자금 유지:', prev.budget.toLocaleString('ko-KR') + '원');
+            return prev;
+          }
+          
+          // 거래 내역에 기록 (AI 응답으로 업데이트하는 경우)
+          const transaction: Transaction = {
+            id: `text-extract-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            date: parsed.status?.date || new Date().toISOString(),
+            amount: extractedBudget! - clientCalculatedBudget, // 변동 금액
+            category: 'AI_REPORT',
+            description: '텍스트에서 자금 추출',
+            balanceAfter: extractedBudget!,
+          };
+          
+          setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+          
+          // 그 외의 경우 (AI 응답이 더 작거나 같으면) AI 응답으로 업데이트
+          console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget!.toLocaleString('ko-KR') + '원');
+          return { ...prev, budget: extractedBudget! };
+        });
       } else {
         console.log('[자금 파싱] ❌ 자금 추출 실패 또는 0원');
       }
@@ -767,6 +1134,26 @@ ${difficultyConfig}
     isLoadingRef.current = isLoading;
   }, [isLoading]);
 
+  // [Money-Validation] 자금 무결성 검증 로직 추가 - 초기 자금 Transaction 기록
+  // 게임 시작 시 초기 자금이 설정되고 transactionHistory가 비어있을 때 초기 Transaction 기록
+  useEffect(() => {
+    if (gameState.budget !== null && transactionHistory.length === 0) {
+      const initialBudget = getInitialBudget(difficulty);
+      // 초기 자금이 설정되었고 거래 내역이 없으면 초기 Transaction 기록
+      if (Math.abs(gameState.budget - initialBudget) < 10000000) { // 0.1억 이내 차이면 초기 자금으로 간주
+        const initialTransaction: Transaction = {
+          id: `initial-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          date: gameState.date || new Date().toISOString(),
+          amount: initialBudget,
+          category: 'INITIAL',
+          description: `게임 시작 - ${difficulty} 모드 초기 자금`,
+          balanceAfter: initialBudget,
+        };
+        setTransactionHistory([initialTransaction]);
+      }
+    }
+  }, [gameState.budget, gameState.date, difficulty, transactionHistory.length]);
+
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     handleSend(input);
@@ -775,8 +1162,9 @@ ${difficultyConfig}
   const handleOptionClick = useCallback((value: string) => {
     playSound('click');
     
-    // "다음 날로 진행" 같은 날짜 진행 명령인지 확인 (더 정확한 패턴 매칭)
+    // "다음 이벤트까지 진행" 또는 "다음 날로 진행" 같은 날짜 진행 명령인지 확인 (더 정확한 패턴 매칭)
     const dateProgressPatterns = [
+      /다음\s*이벤트\s*까지\s*진행/,
       /다음\s*(날|일|날짜|하루)/,
       /(하루|날짜|일정)\s*(진행|넘기|건너뛰)/,
       /(진행|넘기|건너뛰)\s*(하루|날짜|일정)/,
@@ -804,6 +1192,7 @@ ${difficultyConfig}
 
   // 랜덤 이벤트 효과 적용
   const applyEventEffect = (effect: RandomEvent['effect']) => {
+    // [Money-Validation] 자금 무결성 검증 로직 추가
     setGameState((prev) => {
       const newState = { ...prev };
       
@@ -815,6 +1204,18 @@ ${difficultyConfig}
         // 자금 변동이 있으면 콘솔에 로그 (디버깅용)
         if (change !== 0) {
           console.log(`[랜덤 이벤트] 자금 변동: ${change > 0 ? '+' : ''}${(change / 100000000).toFixed(1)}억 원`);
+          
+          // 거래 내역에 기록
+          const transaction: Transaction = {
+            id: `random-event-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            date: newState.date || new Date().toISOString(),
+            amount: change,
+            category: 'RANDOM_EVENT',
+            description: `랜덤 이벤트: ${change > 0 ? '수익' : '손실'}`,
+            balanceAfter: newState.budget,
+          };
+          
+          setTransactionHistory(prevHistory => [...prevHistory, transaction]);
         }
       }
       
@@ -864,6 +1265,12 @@ ${difficultyConfig}
   // [FIX] 시설 업그레이드 - FacilityService 사용
   const handleFacilityUpgrade = (type: FacilityType) => {
     const facility = facilities[type];
+    const definition = FACILITY_DEFINITIONS.find((f) => f.type === type);
+    
+    if (!definition) {
+      console.error(`[시설 업그레이드] 정의를 찾을 수 없습니다: ${type}`);
+      return;
+    }
     
     // [FIX] FacilityService를 사용하여 업그레이드 처리
     import('../services/FacilityService').then(({ getFacilityService }) => {
@@ -883,6 +1290,19 @@ ${difficultyConfig}
       );
 
       if (result.success) {
+        // [Money-Validation] 자금 무결성 검증 로직 추가
+        // 거래 내역에 기록
+        const transaction: Transaction = {
+          id: `facility-upgrade-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          date: gameState.date || new Date().toISOString(),
+          amount: -result.cost, // 차감이므로 음수
+          category: 'FACILITY_UPGRADE',
+          description: `${definition.name} Lv.${facility.level} → Lv.${result.newLevel} 업그레이드`,
+          balanceAfter: gameState.budget !== null ? gameState.budget - result.cost : 0,
+        };
+        
+        setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+        
         // [FIX] 시설 레벨 업데이트
         setFacilities((prev) => ({
           ...prev,
@@ -893,6 +1313,30 @@ ${difficultyConfig}
         }));
         
         playSound('coin');
+        console.log(`[시설 업그레이드] ${definition.name} Lv.${facility.level} → Lv.${result.newLevel} (비용: ${(result.cost / 100000000).toFixed(1)}억 원)`);
+        
+        // AI에게 시설 업그레이드 및 자금 차감 정보 전달
+        const newBudget = gameState.budget !== null ? gameState.budget - result.cost : 0;
+        const facilityMessage = `[시설 업그레이드 완료]
+
+${definition.name}을(를) Lv.${facility.level}에서 Lv.${result.newLevel}로 업그레이드했습니다.
+
+**[자금 변동]**
+- 업그레이드 비용: ${(result.cost / 100000000).toFixed(1)}억 원
+- 업그레이드 전 자금: ${gameState.budget !== null ? (gameState.budget / 100000000).toFixed(1) : '0.0'}억 원
+- 업그레이드 후 자금: ${(newBudget / 100000000).toFixed(1)}억 원
+
+**[시설 효과]**
+${definition.effect(result.newLevel).description}
+
+위 자금 변동을 반영하여 [STATUS] 태그에 업데이트된 자금을 표시해주세요.`;
+        
+        // 약간의 지연을 두어 상태 업데이트가 완료된 후 메시지 전송
+        setTimeout(() => {
+          if (handleSendRef.current) {
+            handleSendRef.current(facilityMessage);
+          }
+        }, 100);
       } else {
         console.warn(`[시설 업그레이드] 실패: ${result.error}`);
         if (result.error) {
@@ -909,16 +1353,19 @@ ${difficultyConfig}
       gameState,
       facilities,
       newsItems,
-      readNewsCount,
-      selectedTeam: selectedTeam,
-      pendingOptions: pendingOptions,
-      difficulty: difficulty,
+      readNewsCount, // 읽은 뉴스 개수도 저장
+      selectedTeam: selectedTeam, // 팀 전체 정보 저장
+      pendingOptions: pendingOptions, // 지시사항 버튼을 위한 옵션 저장
+      difficulty: difficulty, // 난이도 저장
+      transactionHistory: transactionHistory, // [Money-Validation] 자금 무결성 검증 로직 추가 - 거래 내역 저장
+      currentRoster: currentRoster, // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 저장
+      leagueStandings: leagueStandings, // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 저장
       timestamp: new Date().toISOString(),
       metadata: {
         lastModified: Date.now(),
       },
     };
-  }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, pendingOptions, difficulty]);
+  }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, pendingOptions, difficulty, transactionHistory, currentRoster, leagueStandings]);
 
   // [NEW] 파일로 저장 (백업)
   const handleSaveToFile = useCallback(async () => {
@@ -987,6 +1434,18 @@ ${difficultyConfig}
             }
             if (data.pendingOptions) {
               setPendingOptions(data.pendingOptions);
+            }
+            // [Money-Validation] 자금 무결성 검증 로직 추가 - 거래 내역 복원
+            if (data.transactionHistory && Array.isArray(data.transactionHistory)) {
+              setTransactionHistory(data.transactionHistory);
+            }
+            // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
+            if (data.currentRoster && Array.isArray(data.currentRoster)) {
+              setCurrentRoster(data.currentRoster);
+            }
+            // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
+            if (data.leagueStandings && typeof data.leagueStandings === 'object') {
+              setLeagueStandings(data.leagueStandings);
             }
             
             playSound('success');
@@ -1209,6 +1668,18 @@ ${difficultyConfig}
       if (parsed.readNewsCount !== undefined) {
         setReadNewsCount(parsed.readNewsCount);
       }
+      // [Money-Validation] 자금 무결성 검증 로직 추가 - 거래 내역 복원
+      if (parsed.transactionHistory && Array.isArray(parsed.transactionHistory)) {
+        setTransactionHistory(parsed.transactionHistory);
+      }
+      // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
+      if (parsed.currentRoster && Array.isArray(parsed.currentRoster)) {
+        setCurrentRoster(parsed.currentRoster);
+      }
+      // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
+      if (parsed.leagueStandings && typeof parsed.leagueStandings === 'object') {
+        setLeagueStandings(parsed.leagueStandings);
+      }
 
       // **핵심**: 모델에 메시지 히스토리 복원하여 API 연결 유지
       if (parsed.messages.length > 0) {
@@ -1310,15 +1781,6 @@ ${difficultyConfig}
     }
   }, [playSound]);
 
-  // GUI 이벤트 핸들러
-  const handlePlayerSelect = useCallback((player: Player) => {
-    playSound('coin');
-    const message = `${player.name} 선수 선택`;
-    setGamePhase('NEGOTIATION');
-    setNegotiationPlayer(player.name);
-    handleSend(message);
-  }, [handleSend, playSound]);
-
   const handleNegotiationSubmit = useCallback((amount: number) => {
     setNegotiationPlayer((prevPlayer) => {
       if (prevPlayer) {
@@ -1330,11 +1792,6 @@ ${difficultyConfig}
     setGamePhase('MAIN_GAME');
   }, [handleSend]);
 
-  const handleEventModalClose = useCallback(() => {
-    setGamePhase('MAIN_GAME');
-    setGuiEvent(null);
-  }, []);
-
   // 옵션 모달 닫기 핸들러
   const handleOptionsModalClose = () => {
     setIsOptionsModalOpen(false);
@@ -1342,26 +1799,80 @@ ${difficultyConfig}
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#Fdfbf7]">
+    <div className="flex flex-col h-full w-full bg-[#Fdfbf7] overflow-hidden">
       {/* 헤더 - 상태바 */}
-      <GameHeader 
-        teamName={
-          selectedTeam.id === 'expansion' 
-            ? (expansionTeamData?.teamName || selectedTeam.fullName)
-            : (gameState.teamName || selectedTeam.fullName)
-        }
-        budget={gameState.budget}
-        date={gameState.date}
-        season="2026 시즌"
-        difficulty={difficulty}
-        salaryCapUsage={gameState.salaryCapUsage}
-        onApiKeyClick={onResetApiKey}
-        onSaveClick={() => setIsSettingsModalOpen(true)}
-        onLoadClick={() => setIsSettingsModalOpen(true)}
-      />
+      <div className="flex-none pt-[env(safe-area-inset-top)]">
+        <GameHeader 
+          teamName={
+            selectedTeam.id === 'expansion' 
+              ? (expansionTeamData?.teamName || selectedTeam.fullName)
+              : (gameState.teamName || selectedTeam.fullName)
+          }
+          budget={gameState.budget}
+          date={gameState.date}
+          season="2026 시즌"
+          difficulty={difficulty}
+          salaryCapUsage={gameState.salaryCapUsage}
+          onApiKeyClick={onResetApiKey}
+          onSaveClick={handleSave}
+          onLoadClick={handleLoad}
+        />
+      </div>
+
+      {/* 경영 대시보드 툴바 */}
+      <div className="flex-none bg-gradient-to-r from-gray-50 to-white border-b-2 border-baseball-green/20 shadow-sm z-30">
+        <div className="max-w-5xl mx-auto px-3 sm:px-4 md:px-6 py-3 sm:py-3.5">
+          <div className="flex items-center justify-center gap-2 sm:gap-3 md:gap-4">
+            {/* 순위표 버튼 */}
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                setIsStandingsOpen(true);
+                playSound('click');
+              }}
+              className="flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-2 sm:py-2.5 bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 hover:from-baseball-green/20 hover:to-baseball-green/10 active:from-baseball-green/30 active:to-baseball-green/15 border-2 border-baseball-green/30 rounded-lg transition-all shadow-sm hover:shadow-md touch-manipulation min-h-[44px] min-w-[44px] flex-shrink-0"
+              title="리그 순위표"
+            >
+              <Trophy className="w-5 h-5 sm:w-5 sm:h-5 text-baseball-green flex-shrink-0" />
+              <span className="text-xs sm:text-sm font-semibold text-baseball-green hidden sm:inline whitespace-nowrap">순위표</span>
+            </motion.button>
+
+            {/* 장부 버튼 */}
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                setIsTransactionOpen(true);
+                playSound('click');
+              }}
+              className="flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-2 sm:py-2.5 bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 hover:from-baseball-green/20 hover:to-baseball-green/10 active:from-baseball-green/30 active:to-baseball-green/15 border-2 border-baseball-green/30 rounded-lg transition-all shadow-sm hover:shadow-md touch-manipulation min-h-[44px] min-w-[44px] flex-shrink-0"
+              title="거래 내역"
+            >
+              <Receipt className="w-5 h-5 sm:w-5 sm:h-5 text-baseball-green flex-shrink-0" />
+              <span className="text-xs sm:text-sm font-semibold text-baseball-green hidden sm:inline whitespace-nowrap">장부</span>
+            </motion.button>
+
+            {/* 최근 경기 버튼 */}
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                setIsResultOpen(true);
+                playSound('click');
+              }}
+              className="flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-2 sm:py-2.5 bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 hover:from-baseball-green/20 hover:to-baseball-green/10 active:from-baseball-green/30 active:to-baseball-green/15 border-2 border-baseball-green/30 rounded-lg transition-all shadow-sm hover:shadow-md touch-manipulation min-h-[44px] min-w-[44px] flex-shrink-0"
+              title="최근 경기 결과"
+            >
+              <MonitorPlay className="w-5 h-5 sm:w-5 sm:h-5 text-baseball-green flex-shrink-0" />
+              <span className="text-xs sm:text-sm font-semibold text-baseball-green hidden sm:inline whitespace-nowrap">경기 결과</span>
+            </motion.button>
+          </div>
+        </div>
+      </div>
 
       {/* 메인 - 채팅 영역 */}
-      <div className="flex-1 overflow-y-auto px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 lg:py-6 overscroll-contain">
+      <div className="flex-1 overflow-y-auto px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 lg:py-6 overscroll-contain min-h-0">
         <div className="max-w-5xl mx-auto w-full">
           {messages.map((msg, idx) => (
             <MessageBubble
@@ -1375,7 +1886,7 @@ ${difficultyConfig}
       </div>
 
       {/* 푸터 - 입력 영역 */}
-      <div className="border-t-2 border-baseball-green/20 bg-gradient-to-b from-gray-50 to-white shadow-2xl mobile-input-container">
+      <div className="flex-none border-t-2 border-baseball-green/20 bg-gradient-to-b from-gray-50 to-white shadow-2xl z-40 pb-[env(safe-area-inset-bottom)] mobile-input-container">
         {/* 선택지 버튼 패널 제거됨 - 모달로 대체 */}
 
         {/* 입력 폼 */}
@@ -1503,14 +2014,28 @@ ${difficultyConfig}
         onUpgrade={handleFacilityUpgrade}
       />
 
-      {/* 설정 모달 */}
-      <SettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        onSaveToFile={handleSaveToFile}
-        onLoadFromFile={handleLoadFromFile}
-        onLocalSave={handleLocalSave}
-        onLocalLoad={handleLoad}
+      {/* 거래 내역 모달 */}
+      <TransactionModal
+        isOpen={isTransactionOpen}
+        onClose={() => setIsTransactionOpen(false)}
+        transactions={transactionHistory}
+      />
+
+      {/* 리그 순위표 모달 */}
+      <StandingsModal
+        isOpen={isStandingsOpen}
+        onClose={() => setIsStandingsOpen(false)}
+        standings={leagueStandings}
+        myTeam={selectedTeam.id === 'expansion' 
+          ? (expansionTeamData?.teamName || selectedTeam.fullName)
+          : (gameState.teamName || selectedTeam.fullName)}
+      />
+
+      {/* 경기 결과 모달 */}
+      <GameResultModal
+        isOpen={isResultOpen}
+        onClose={() => setIsResultOpen(false)}
+        lastGameResult={lastGameResult}
       />
 
     </div>

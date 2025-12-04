@@ -3,11 +3,12 @@ import { motion } from 'framer-motion';
 import { FolderOpen, Play } from 'lucide-react';
 
 interface StartScreenProps {
+  apiKey: string;
   onLoadGame: () => void;
   onStartNew: () => void;
 }
 
-export default function StartScreen({ onLoadGame, onStartNew }: StartScreenProps) {
+export default function StartScreen({ apiKey, onLoadGame, onStartNew }: StartScreenProps) {
   const isProcessingRef = React.useRef(false);
   
   const handleLoadGame = (e?: React.MouseEvent | React.TouchEvent) => {
@@ -34,7 +35,7 @@ export default function StartScreen({ onLoadGame, onStartNew }: StartScreenProps
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-baseball-green via-[#0a3528] to-baseball-green-dark flex items-center justify-center p-3 sm:p-4">
+    <div className="min-h-screen bg-gradient-to-br from-baseball-green via-[#0a3528] to-baseball-green-dark flex items-center justify-center p-3 sm:p-4 relative">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -78,7 +79,15 @@ export default function StartScreen({ onLoadGame, onStartNew }: StartScreenProps
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={onStartNew}
+            onClick={() => {
+              if (isProcessingRef.current) return;
+              isProcessingRef.current = true;
+              onStartNew();
+              // 약간의 지연 후 플래그 해제
+              setTimeout(() => {
+                isProcessingRef.current = false;
+              }, 500);
+            }}
             className="flex items-center justify-center gap-3 bg-baseball-gold hover:bg-yellow-500 text-white font-bold text-lg px-8 py-4 rounded-xl shadow-2xl transition-all w-full sm:w-auto min-w-[200px]"
           >
             <Play className="w-6 h-6" />

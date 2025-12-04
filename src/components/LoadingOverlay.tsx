@@ -7,11 +7,37 @@ interface LoadingOverlayProps {
   statusText?: string;
 }
 
+// 롤링 텍스트 배열 (게임 초기화 시 사용)
+const loadingMessages = [
+  '구단 데이터를 분석 중입니다...',
+  '스카우터 파견 중...',
+  '로스터 정보를 수집 중입니다...',
+  '선수 능력치를 평가 중입니다...',
+  '경기 일정을 확인 중입니다...',
+  '재정 상태를 점검 중입니다...',
+  '시설 정보를 확인 중입니다...',
+  '리그 데이터를 동기화 중입니다...',
+  '게임 엔진을 초기화 중입니다...',
+  '최종 점검 중입니다...',
+];
+
 export default function LoadingOverlay({ isLoading, statusText }: LoadingOverlayProps) {
   const [progress, setProgress] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
+  const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 롤링 텍스트 업데이트 (2초마다)
+  useEffect(() => {
+    if (isLoading && !statusText) {
+      const messageInterval = setInterval(() => {
+        setCurrentMessageIndex((prev) => (prev + 1) % loadingMessages.length);
+      }, 2000); // 2초마다 메시지 변경
+
+      return () => clearInterval(messageInterval);
+    }
+  }, [isLoading, statusText]);
 
   // Trickle 알고리즘: 점진적으로 느려지는 가짜 진행률
   useEffect(() => {
@@ -92,11 +118,8 @@ export default function LoadingOverlay({ isLoading, statusText }: LoadingOverlay
   // 진행률에 따라 상태 텍스트 결정
   const getStatusText = () => {
     if (statusText) return statusText;
-    if (progress < 20) return '게임 상태를 분석 중입니다...';
-    if (progress < 40) return '선수 데이터를 확인 중입니다...';
-    if (progress < 60) return '전략을 수립 중입니다...';
-    if (progress < 80) return '보고서를 작성 중입니다...';
-    return '최종 검토 중입니다...';
+    // 롤링 텍스트 사용
+    return loadingMessages[currentMessageIndex];
   };
 
   if (!isVisible && !isLoading) return null;

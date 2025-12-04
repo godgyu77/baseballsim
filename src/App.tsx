@@ -6,15 +6,15 @@ import DifficultyModal from './components/DifficultyModal';
 import TeamSelector from './components/TeamSelector';
 import ExpansionTeamForm, { OwnerType } from './components/ExpansionTeamForm';
 import ChatInterface from './components/ChatInterface';
+import { ToastProvider } from './context/ToastContext';
 import { Team } from './constants/TeamData';
-import { GamePhase } from './lib/utils';
 import { Difficulty } from './constants/GameConfig';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { getStorageService } from './services/StorageService';
 import { loadGameData } from './lib/dataLoader';
-import SettingsModal from './components/SettingsModal';
 import { FileStorageStrategy } from './services/FileStorageStrategy';
 import { GameSaveData } from './services/StorageService';
+import LoadGameModal from './components/LoadGameModal';
 
 const SAVE_KEY = 'baseball_game_save';
 
@@ -179,7 +179,7 @@ function AppContent() {
         if (parsed.difficulty === 'HARD') {
           setDifficulty('HELL');
         } else {
-          setDifficulty(parsed.difficulty);
+          setDifficulty(parsed.difficulty as Difficulty);
         }
       } else {
         setDifficulty('NORMAL');
@@ -283,7 +283,7 @@ function AppContent() {
   };
 
   // [NEW] 불러오기 모달 열기 (StartScreen에서 호출)
-  const handleOpenLoadModal = () => {
+  const handleLoadGame = () => {
     setIsLoadModalOpen(true);
   };
 
@@ -301,6 +301,8 @@ function AppContent() {
     setShouldLoadGame(false);
     setSelectedTeam(null);
     setDifficulty(null);
+    
+    // 난이도 선택 화면으로 이동 (API 호출 없이 즉시)
     setScreenView('difficulty_select');
   };
 
@@ -318,15 +320,15 @@ function AppContent() {
           <>
             <StartScreen
               key="start-screen"
-              onLoadGame={handleOpenLoadModal}
+              apiKey={apiKey}
+              onLoadGame={handleLoadGame}
               onStartNew={handleStartNewGame}
             />
-            {/* 불러오기 설정 모달 */}
-            <SettingsModal
+            <LoadGameModal
               isOpen={isLoadModalOpen}
               onClose={() => setIsLoadModalOpen(false)}
+              onLoadFromLocal={handleLoadFromLocal}
               onLoadFromFile={handleLoadFromFile}
-              onLocalLoad={handleLoadFromLocal}
             />
           </>
         ) : screenView === 'difficulty_select' ? (
@@ -360,11 +362,13 @@ function AppContent() {
   );
 }
 
-// [NEW] 외부 App 컴포넌트 (AuthProvider로 감싸기)
+// [NEW] 외부 App 컴포넌트 (AuthProvider와 ToastProvider로 감싸기)
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
     </AuthProvider>
   );
 }
