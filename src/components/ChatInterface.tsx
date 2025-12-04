@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Building2, Newspaper, ClipboardList } from 'lucide-react';
+import { Send, Building2, Newspaper, ClipboardList, Trophy, Receipt, MonitorPlay } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { getGeminiModel, initializeGameWithData } from '../lib/gemini';
 import GameHeader from './GameHeader';
@@ -10,6 +10,10 @@ import RandomEventModal from './RandomEventModal';
 import FacilityManagement from './FacilityManagement';
 import OptionsModal from './OptionsModal';
 import NewsSidebar, { NewsItem } from './NewsSidebar';
+import TransactionModal from './TransactionModal';
+import StandingsModal from './StandingsModal';
+import GameResultModal from './GameResultModal';
+import { useToast } from '../context/ToastContext';
 import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo, Transaction, validateBudgetIntegrity, Player, validateRosterIntegrity, extractPlayerNamesFromInitialData, GameResult, TeamRecord } from '../lib/utils';
 import { getInitialBudget } from '../constants/GameConfig';
 import { Team } from '../constants/TeamData';
@@ -78,6 +82,12 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
   const [currentRoster, setCurrentRoster] = useState<Player[]>([]); // 현재 로스터 상태
   // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 상태 관리
   const [leagueStandings, setLeagueStandings] = useState<Record<string, TeamRecord>>({}); // 팀별 전적 맵 (팀 이름 -> 전적)
+  const [lastGameResult, setLastGameResult] = useState<GameResult | null>(null); // 최근 경기 결과
+  // 모달 상태 관리
+  const [isTransactionOpen, setIsTransactionOpen] = useState(false);
+  const [isStandingsOpen, setIsStandingsOpen] = useState(false);
+  const [isResultOpen, setIsResultOpen] = useState(false);
+  const { showToast } = useToast(); // Toast 알림 훅
   const isLoadProcessingRef = useRef(false); // 불러오기 중복 방지 플래그
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInstanceRef = useRef<any>(null);
@@ -115,17 +125,32 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       // 채팅 인스턴스가 없으면 새로 생성
       // messagesRef를 사용하여 최신 메시지 목록 참조 (방금 추가한 사용자 메시지 포함)
       if (!chatInstanceRef.current) {
-        // 사용자 메시지를 제외한 히스토리 생성 (방금 추가한 메시지 제외)
-        const currentMessages = [...messagesRef.current, { text: userMessage, isUser: true }];
-        const history = currentMessages.length > 1 
-          ? currentMessages.slice(0, -1).map(msg => ({
+        // [CRITICAL FIX] history 생성 시 주의:
+        // 1. initializeGameWithData 이후에는 messagesRef가 초기화되어 있으므로 빈 배열로 시작
+        // 2. 첫 번째 메시지는 반드시 user role이어야 함 (API 규칙)
+        // 3. messagesRef.current에 AI 응답이 먼저 있으면 제거하고 user 메시지부터 시작
+        const currentMessages = messagesRef.current;
+        
+        // AI 응답이 첫 번째로 오는 경우 제거 (API 규칙 위반 방지)
+        const filteredMessages = currentMessages.length > 0 && !currentMessages[0].isUser
+          ? currentMessages.filter((_, idx) => idx === 0 ? false : true) // 첫 번째 AI 메시지 제거
+          : currentMessages;
+        
+        // 사용자 메시지를 제외한 히스토리 생성 (방금 추가한 사용자 메시지 제외)
+        const history = filteredMessages.length > 0
+          ? filteredMessages.map(msg => ({
               role: msg.isUser ? 'user' : 'model',
               parts: [{ text: msg.text }],
             }))
           : [];
 
+        // [CRITICAL] history의 첫 번째 항목이 'model'이면 제거 (API 규칙 위반 방지)
+        const safeHistory = history.length > 0 && history[0].role === 'model'
+          ? history.slice(1) // 첫 번째 model 메시지 제거
+          : history;
+
         chatInstanceRef.current = modelRef.current.startChat({
-          history: history,
+          history: safeHistory, // 안전한 history 사용
         });
       }
 
@@ -246,6 +271,13 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                 
                 setTransactionHistory(prevHistory => [...prevHistory, transaction]);
                 
+                // Toast 알림: 자금 변동
+                if (amount > 0) {
+                  showToast(`${(amount / 100000000).toFixed(1)}억 원 수입이 발생했습니다`, 'success');
+                } else {
+                  showToast(`${Math.abs(amount / 100000000).toFixed(1)}억 원을 지출했습니다`, 'warning');
+                }
+                
                 return { ...prev, budget: newBudget };
               }
               return prev;
@@ -311,6 +343,17 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
 
           // [Sim-Engine] 경기 결과 파싱 및 전적 반영
           if (parsed.gameResults && parsed.gameResults.length > 0) {
+            // 최근 경기 결과 저장 (첫 번째 경기 또는 우리 팀 경기)
+            const myTeamGame = parsed.gameResults.find(r => r.isMyTeamGame);
+            if (myTeamGame) {
+              setLastGameResult(myTeamGame);
+            } else if (parsed.gameResults.length > 0) {
+              setLastGameResult(parsed.gameResults[0]);
+            }
+            
+            // Toast 알림: 경기 결과 도착
+            showToast('경기 결과가 도착했습니다', 'info');
+            
             setLeagueStandings(prevStandings => {
               const newStandings = { ...prevStandings };
               let myTeamWins = 0;
@@ -397,8 +440,6 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                     `현재 전적: ${myTeamRecord.wins}승 ${myTeamRecord.losses}패 ${myTeamRecord.draws}무 ` +
                     `(승률: ${(myTeamRecord.winPercentage! * 100).toFixed(3)}%)`
                   );
-                  // TODO: 향후 Toast 알림 컴포넌트 추가 시 아래 주석 해제
-                  // toast.success(`경기 결과 반영: ${myTeamRecord.wins}승 ${myTeamRecord.losses}패 ${myTeamRecord.draws}무`);
                 }
               } else {
                 console.log(`[Sim-Engine] 경기 결과가 반영되었습니다. (${parsed.gameResults.length}경기 처리)`);
@@ -727,6 +768,12 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     if (selectedTeam && messages.length === 0 && isModelReady && modelRef.current && !hasSavedData && !isInitializingRef.current) {
       isInitializingRef.current = true;
       
+      // [CRITICAL FIX] 이전 메시지 및 채팅 인스턴스 완전 초기화
+      // 화면에 표시된 모든 메시지와 AI 응답을 제거하여 API 오류 방지
+      setMessages([]);
+      messagesRef.current = [];
+      chatInstanceRef.current = null; // 채팅 인스턴스 초기화 (새 세션 시작)
+      
       // 옵션 초기화 (일정 진행 버튼만 표시되도록) - 함수형 업데이트로 중복 방지
       setPendingOptions(prev => prev.length === 0 ? prev : []);
       setCurrentOptions(prev => prev.length === 0 ? prev : []);
@@ -740,11 +787,18 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       // 주의: messages 상태를 인자로 넘기지 않음 (API 규칙 준수)
       // initializeGameWithData 내부에서 history: []로 빈 세션을 강제로 시작하므로,
       // 이전 UI에 있던 텍스트(Model 응답)는 절대 전달되지 않음
-      // 이 함수는 history 인자를 받지 않으며, 받더라도 무시하고 빈 배열로 시작함
-      initializeGameWithData(apiKey, selectedTeam, difficulty)
+      // 함수 시그니처에 _ignoredHistory가 있더라도 무시하고 빈 배열로 시작함
+      initializeGameWithData(apiKey, difficulty, selectedTeam)
         .then((initialResponse) => {
           // 초기 응답을 첫 메시지로 추가
           setMessages([{ text: initialResponse, isUser: false }]);
+          messagesRef.current = [{ text: initialResponse, isUser: false }];
+          
+          // [CRITICAL FIX] initializeGameWithData는 독립적인 세션이므로
+          // 이후 handleSend에서 사용할 chatInstanceRef를 null로 유지하여
+          // 다음 메시지 전송 시 새 세션을 시작하도록 함
+          // (또는 initializeGameWithData의 세션을 재사용하려면 별도 관리 필요)
+          // 현재는 null로 두어 handleSend에서 새로 생성하도록 함
           
           // 신생 구단인 경우 추가 정보 전송
           if (selectedTeam.id === 'expansion') {
@@ -1409,6 +1463,58 @@ ${definition.effect(newLevel).description}
         />
       </div>
 
+      {/* 경영 대시보드 툴바 */}
+      <div className="flex-none bg-gradient-to-r from-gray-50 to-white border-b-2 border-baseball-green/20 shadow-sm z-30">
+        <div className="max-w-5xl mx-auto px-3 sm:px-4 md:px-6 py-3 sm:py-3.5">
+          <div className="flex items-center justify-center gap-2 sm:gap-3 md:gap-4">
+            {/* 순위표 버튼 */}
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                setIsStandingsOpen(true);
+                playSound('click');
+              }}
+              className="flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-2 sm:py-2.5 bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 hover:from-baseball-green/20 hover:to-baseball-green/10 active:from-baseball-green/30 active:to-baseball-green/15 border-2 border-baseball-green/30 rounded-lg transition-all shadow-sm hover:shadow-md touch-manipulation min-h-[44px] min-w-[44px] flex-shrink-0"
+              title="리그 순위표"
+            >
+              <Trophy className="w-5 h-5 sm:w-5 sm:h-5 text-baseball-green flex-shrink-0" />
+              <span className="text-xs sm:text-sm font-semibold text-baseball-green hidden sm:inline whitespace-nowrap">순위표</span>
+            </motion.button>
+
+            {/* 장부 버튼 */}
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                setIsTransactionOpen(true);
+                playSound('click');
+              }}
+              className="flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-2 sm:py-2.5 bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 hover:from-baseball-green/20 hover:to-baseball-green/10 active:from-baseball-green/30 active:to-baseball-green/15 border-2 border-baseball-green/30 rounded-lg transition-all shadow-sm hover:shadow-md touch-manipulation min-h-[44px] min-w-[44px] flex-shrink-0"
+              title="거래 내역"
+            >
+              <Receipt className="w-5 h-5 sm:w-5 sm:h-5 text-baseball-green flex-shrink-0" />
+              <span className="text-xs sm:text-sm font-semibold text-baseball-green hidden sm:inline whitespace-nowrap">장부</span>
+            </motion.button>
+
+            {/* 최근 경기 버튼 */}
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                setIsResultOpen(true);
+                playSound('click');
+              }}
+              className="flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-2 sm:py-2.5 bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 hover:from-baseball-green/20 hover:to-baseball-green/10 active:from-baseball-green/30 active:to-baseball-green/15 border-2 border-baseball-green/30 rounded-lg transition-all shadow-sm hover:shadow-md touch-manipulation min-h-[44px] min-w-[44px] flex-shrink-0"
+              title="최근 경기 결과"
+            >
+              <MonitorPlay className="w-5 h-5 sm:w-5 sm:h-5 text-baseball-green flex-shrink-0" />
+              <span className="text-xs sm:text-sm font-semibold text-baseball-green hidden sm:inline whitespace-nowrap">경기 결과</span>
+            </motion.button>
+          </div>
+        </div>
+      </div>
+
       {/* 메인 - 채팅 영역 */}
       <div className="flex-1 overflow-y-auto px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4 lg:py-6 overscroll-contain min-h-0">
         <div className="max-w-5xl mx-auto w-full">
@@ -1550,6 +1656,30 @@ ${definition.effect(newLevel).description}
         facilities={facilities}
         budget={gameState.budget}
         onUpgrade={handleFacilityUpgrade}
+      />
+
+      {/* 거래 내역 모달 */}
+      <TransactionModal
+        isOpen={isTransactionOpen}
+        onClose={() => setIsTransactionOpen(false)}
+        transactions={transactionHistory}
+      />
+
+      {/* 리그 순위표 모달 */}
+      <StandingsModal
+        isOpen={isStandingsOpen}
+        onClose={() => setIsStandingsOpen(false)}
+        standings={leagueStandings}
+        myTeam={selectedTeam.id === 'expansion' 
+          ? (expansionTeamData?.teamName || selectedTeam.fullName)
+          : (gameState.teamName || selectedTeam.fullName)}
+      />
+
+      {/* 경기 결과 모달 */}
+      <GameResultModal
+        isOpen={isResultOpen}
+        onClose={() => setIsResultOpen(false)}
+        lastGameResult={lastGameResult}
       />
 
     </div>

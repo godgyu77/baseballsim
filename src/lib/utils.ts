@@ -7,6 +7,7 @@ export interface ParsedMessage {
   financeUpdate?: FinanceUpdate; // FA 보상금 등 자금 변동 정보
   roster?: Player[]; // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 데이터
   gameResults?: GameResult[]; // [Sim-Engine] 경기 결과 파싱 및 전적 반영
+  retirementResult?: import('../types').RetirementResult; // [Retirement] 선수 은퇴 심사 결과
 }
 
 // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 경기 결과 타입 정의
@@ -539,12 +540,24 @@ function removeSystemTags(text: string): string {
     // [FINANCE_UPDATE: ...] 패턴 제거 (멀티라인 지원)
     cleaned = cleaned.replace(/\[FINANCE_UPDATE:[\s\S]*?\]/gs, '');
     
+    // <RETIREMENT_RESULT> ... </RETIREMENT_RESULT> 패턴 제거 (멀티라인 지원)
+    cleaned = cleaned.replace(/<RETIREMENT_RESULT>[\s\S]*?<\/RETIREMENT_RESULT>/gs, '');
+    
+    // <GAME_RESULTS> ... </GAME_RESULTS> 패턴 제거 (멀티라인 지원)
+    cleaned = cleaned.replace(/<GAME_RESULTS>[\s\S]*?<\/GAME_RESULTS>/gs, '');
+    
+    // [ROSTER: ...] 패턴 제거 (멀티라인 지원)
+    cleaned = cleaned.replace(/\[ROSTER:[\s\S]*?\]/gs, '');
+    
     // 불완전한 태그도 제거 (스트리밍 중 부분적으로 나타나는 경우)
     cleaned = cleaned.replace(/\[GUI_EVENT:[\s\S]*$/gs, '');
     cleaned = cleaned.replace(/\[OPTIONS:[\s\S]*$/gs, '');
     cleaned = cleaned.replace(/\[STATUS:[\s\S]*$/gs, '');
     cleaned = cleaned.replace(/\[FINANCE_UPDATE:[\s\S]*$/gs, '');
     cleaned = cleaned.replace(/\[NEWS:[\s\S]*$/gs, '');
+    cleaned = cleaned.replace(/\[ROSTER:[\s\S]*$/gs, '');
+    cleaned = cleaned.replace(/<RETIREMENT_RESULT>[\s\S]*$/gs, '');
+    cleaned = cleaned.replace(/<GAME_RESULTS>[\s\S]*$/gs, '');
     
     // 일반적인 시스템 태그 패턴 제거
     cleaned = cleaned.replace(/\[[A-Z_]+:[\s\S]*?\]/gs, '');
@@ -880,6 +893,34 @@ export function parseAIResponse(message: string): ParsedMessage {
   // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - <GAME_RESULTS> 태그 파싱
   const gameResults = parseGameResults(originalText);
   
+  // [Retirement] 선수 은퇴 심사 결과 파싱 - <RETIREMENT_RESULT> 태그 파싱
+  let retirementResult: import('../types').RetirementResult | undefined = undefined;
+  const retirementRegex = /<RETIREMENT_RESULT>\s*(\{[\s\S]*?\})\s*<\/RETIREMENT_RESULT>/gs;
+  const retirementMatch = originalText.match(retirementRegex);
+  
+  if (retirementMatch) {
+    try {
+      const firstMatch = retirementMatch[0];
+      const jsonMatch = firstMatch.match(/<RETIREMENT_RESULT>\s*(\{[\s\S]*?\})\s*<\/RETIREMENT_RESULT>/s);
+      if (jsonMatch && jsonMatch[1]) {
+        const retirementJson = JSON.parse(jsonMatch[1]);
+        // 필수 필드 검증
+        if (
+          retirementJson.playerName &&
+          retirementJson.teamId &&
+          retirementJson.leagueLegendVote &&
+          retirementJson.teamRetiredNumberVote &&
+          typeof retirementJson.leagueLegendVote.score === 'number' &&
+          typeof retirementJson.teamRetiredNumberVote.score === 'number'
+        ) {
+          retirementResult = retirementJson as import('../types').RetirementResult;
+        }
+      }
+    } catch (e) {
+      console.warn('[Retirement] RETIREMENT_RESULT 태그 파싱 오류:', e);
+    }
+  }
+  
   // 2단계: 화면 표시용 텍스트 생성 (모든 시스템 태그 제거)
   const cleanText = removeSystemTags(originalText);
   
@@ -891,7 +932,8 @@ export function parseAIResponse(message: string): ParsedMessage {
     news: news.length > 0 ? news : undefined,
     financeUpdate: financeUpdate || undefined,
     roster: roster || undefined, // [Roster-Validation] 로스터 무결성 검사 추가
-    gameResults: gameResults.length > 0 ? gameResults : undefined // [Sim-Engine] 경기 결과 파싱 및 전적 반영
+    gameResults: gameResults.length > 0 ? gameResults : undefined, // [Sim-Engine] 경기 결과 파싱 및 전적 반영
+    retirementResult: retirementResult || undefined // [Retirement] 선수 은퇴 심사 결과
   };
 }
 

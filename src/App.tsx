@@ -6,6 +6,7 @@ import DifficultyModal from './components/DifficultyModal';
 import TeamSelector from './components/TeamSelector';
 import ExpansionTeamForm, { OwnerType } from './components/ExpansionTeamForm';
 import ChatInterface from './components/ChatInterface';
+import { ToastProvider } from './context/ToastContext';
 import { Team } from './constants/TeamData';
 import { GamePhase } from './lib/utils';
 import { Difficulty } from './constants/GameConfig';
@@ -129,45 +130,47 @@ function App() {
   };
 
   return (
-    <div className="h-full w-full bg-[#F5F7FA] px-0 sm:px-2 overflow-x-hidden overflow-y-hidden">
-      <AnimatePresence mode="wait">
-        {showApiKeyModal ? (
-          <ApiKeyModal key="api-key-modal" onApiKeySet={handleApiKeySet} />
-        ) : screenView === 'start' ? (
-          <StartScreen
-            key="start-screen"
-            apiKey={apiKey}
-            onLoadGame={handleLoadGame}
-            onStartNew={handleStartNewGame}
-          />
-        ) : screenView === 'difficulty_select' ? (
-          <DifficultyModal
-            key="difficulty-modal"
-            isOpen={true}
-            onSelect={handleDifficultySelect}
-          />
-        ) : screenView === 'team_select' ? (
-          <TeamSelector key="team-selector" onSelect={handleTeamSelect} />
-        ) : screenView === 'expansion_form' ? (
-          <ExpansionTeamForm
-            key="expansion-form"
-            onComplete={handleExpansionTeamComplete}
-            onBack={handleExpansionTeamBack}
-          />
-        ) : screenView === 'game' && selectedTeam && difficulty ? (
-          <ChatInterface 
-            key="chat-interface" 
-            apiKey={apiKey} 
-            selectedTeam={selectedTeam}
-            difficulty={difficulty}
-            expansionTeamData={expansionTeamData}
-            onResetApiKey={handleResetApiKey}
-            shouldLoadGame={shouldLoadGame}
-            onGameLoaded={() => setShouldLoadGame(false)}
-          />
-        ) : null}
-      </AnimatePresence>
-    </div>
+    <ToastProvider>
+      <div className="h-full w-full bg-[#F5F7FA] px-0 sm:px-2 overflow-x-hidden overflow-y-hidden">
+        <AnimatePresence mode="wait">
+          {showApiKeyModal ? (
+            <ApiKeyModal key="api-key-modal" onApiKeySet={handleApiKeySet} />
+          ) : screenView === 'start' ? (
+            <StartScreen
+              key="start-screen"
+              apiKey={apiKey}
+              onLoadGame={handleLoadGame}
+              onStartNew={handleStartNewGame}
+            />
+          ) : screenView === 'difficulty_select' ? (
+            <DifficultyModal
+              key="difficulty-modal"
+              isOpen={true}
+              onSelect={handleDifficultySelect}
+            />
+          ) : screenView === 'team_select' ? (
+            <TeamSelector key="team-selector" onSelect={handleTeamSelect} />
+          ) : screenView === 'expansion_form' ? (
+            <ExpansionTeamForm
+              key="expansion-form"
+              onComplete={handleExpansionTeamComplete}
+              onBack={handleExpansionTeamBack}
+            />
+          ) : screenView === 'game' && selectedTeam && difficulty ? (
+            <ChatInterface 
+              key="chat-interface" 
+              apiKey={apiKey} 
+              selectedTeam={selectedTeam}
+              difficulty={difficulty}
+              expansionTeamData={expansionTeamData}
+              onResetApiKey={handleResetApiKey}
+              shouldLoadGame={shouldLoadGame}
+              onGameLoaded={() => setShouldLoadGame(false)}
+            />
+          ) : null}
+        </AnimatePresence>
+      </div>
+    </ToastProvider>
   );
 }
 
