@@ -1,4 +1,5 @@
 import { Calendar, DollarSign, Building2, Trophy, KeyRound, Save, FolderOpen } from 'lucide-react';
+import { formatTeamName } from '../lib/uiUtils';
 
 import { Difficulty } from '../constants/GameConfig';
 
@@ -37,7 +38,9 @@ export default function GameHeader({
           {/* 왼쪽: 팀 정보 */}
           <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0 flex-1">
             <Building2 className="w-4 h-4 sm:w-5 sm:h-5 text-baseball-gold flex-shrink-0" />
-            <span className="font-black text-sm sm:text-base md:text-lg lg:text-xl tracking-tight truncate">{teamName}</span>
+            <span className="font-black text-sm sm:text-base md:text-lg lg:text-xl tracking-tight truncate">
+              {formatTeamName(teamName)}
+            </span>
             {/* 난이도 뱃지 */}
             {difficulty && (
               <>

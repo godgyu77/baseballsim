@@ -11,7 +11,9 @@ import RandomEventModal from './RandomEventModal';
 import FacilityManagement from './FacilityManagement';
 import OptionsModal from './OptionsModal';
 import NewsSidebar, { NewsItem } from './NewsSidebar';
+import SettingsModal from './SettingsModal';
 import { parseAIResponse, extractDate, extractBudget, extractTeamName, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo } from '../lib/utils';
+import { filterProtectedPlayers, validateDraftPicks, updatePlayerTeamAffiliation, sortDraftOrder, createDraftPool, DraftPlayer, ProtectedPlayer, TeamRank } from '../lib/draftUtils';
 import { Team } from '../constants/TeamData';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
@@ -67,6 +69,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
   const [facilities, setFacilities] = useState<FacilityState>(createInitialFacilityState());
   const [loadingStatusText, setLoadingStatusText] = useState<string | undefined>(undefined);
   const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [pendingOptions, setPendingOptions] = useState<Array<{ label: string; value: string; style?: 'primary' | 'secondary' | 'danger' }>>([]);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [isNewsOpen, setIsNewsOpen] = useState(false);
@@ -238,8 +241,68 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           // 선수 목록 모달은 표시하지 않고 채팅으로만 처리
           if (parsed.guiEvent) {
             console.log('[GUI_EVENT] 수신:', parsed.guiEvent);
+            
+            // [FIX] 드래프트 로직 검증 및 수정
+            if (parsed.guiEvent.type === 'DRAFT') {
+              try {
+                const draftData = parsed.guiEvent.data || parsed.guiEvent.candidates || [];
+                const protectedList = parsed.guiEvent.protectedPlayers || [];
+                const teamRanks = parsed.guiEvent.teamRanks || [];
+                
+                // [FIX] 1. 보호선수 필터링 적용
+                if (Array.isArray(draftData) && Array.isArray(protectedList)) {
+                  const filteredPool = filterProtectedPlayers(
+                    draftData as DraftPlayer[],
+                    protectedList as ProtectedPlayer[]
+                  );
+                  
+                  // 필터링된 풀을 GUI_EVENT에 반영
+                  if (filteredPool.length !== draftData.length) {
+                    console.warn(
+                      `[DraftService] 보호선수 필터링: ${draftData.length}명 → ${filteredPool.length}명`
+                    );
+                    parsed.guiEvent.candidates = filteredPool;
+                    parsed.guiEvent.data = { ...parsed.guiEvent.data, candidates: filteredPool };
+                  }
+                }
+                
+                // [FIX] 2. 드래프트 순번 정렬 검증
+                if (Array.isArray(teamRanks) && teamRanks.length > 0) {
+                  const sortedOrder = sortDraftOrder(teamRanks as TeamRank[]);
+                  parsed.guiEvent.teamRanks = sortedOrder;
+                  parsed.guiEvent.data = { ...parsed.guiEvent.data, draftOrder: sortedOrder };
+                }
+                
+                // [FIX] 3. 지명 검증 (사용자가 선택한 경우)
+                if (parsed.guiEvent.picks && Array.isArray(parsed.guiEvent.picks)) {
+                  const validatedPicks = validateDraftPicks(
+                    parsed.guiEvent.picks,
+                    (parsed.guiEvent.candidates || parsed.guiEvent.data?.candidates || []) as DraftPlayer[],
+                    10 // maxPicks
+                  );
+                  
+                  if (validatedPicks.length !== parsed.guiEvent.picks.length) {
+                    console.warn(
+                      `[DraftService] 지명 검증: ${parsed.guiEvent.picks.length}명 → ${validatedPicks.length}명`
+                    );
+                  }
+                  
+                  // [FIX] 4. 소속 팀 갱신
+                  if (selectedTeam?.id) {
+                    const updatedPicks = updatePlayerTeamAffiliation(validatedPicks, selectedTeam.id);
+                    parsed.guiEvent.picks = updatedPicks;
+                    parsed.guiEvent.data = { ...parsed.guiEvent.data, picks: updatedPicks };
+                  }
+                }
+              } catch (draftError) {
+                console.error('[DraftService] 드래프트 검증 오류:', draftError);
+                // 오류가 발생해도 게임 진행은 계속
+              }
+            }
+            
+            setGuiEvent(parsed.guiEvent);
             // 모달을 표시하지 않고 채팅으로만 표시
-              playSound('success');
+            playSound('success');
           } else {
             playSound('success');
           }
@@ -297,6 +360,58 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
             // 선수 목록 모달은 표시하지 않고 채팅으로만 처리
             if (parsed.guiEvent) {
               console.log('[GUI_EVENT] 수신:', parsed.guiEvent);
+              
+              // [FIX] 드래프트 로직 검증 및 수정 (동일한 로직 적용)
+              if (parsed.guiEvent.type === 'DRAFT') {
+                try {
+                  const draftData = parsed.guiEvent.data || parsed.guiEvent.candidates || [];
+                  const protectedList = parsed.guiEvent.protectedPlayers || [];
+                  const teamRanks = parsed.guiEvent.teamRanks || [];
+                  
+                  // [FIX] 1. 보호선수 필터링 적용
+                  if (Array.isArray(draftData) && Array.isArray(protectedList)) {
+                    const filteredPool = filterProtectedPlayers(
+                      draftData as DraftPlayer[],
+                      protectedList as ProtectedPlayer[]
+                    );
+                    
+                    if (filteredPool.length !== draftData.length) {
+                      console.warn(
+                        `[DraftService] 보호선수 필터링: ${draftData.length}명 → ${filteredPool.length}명`
+                      );
+                      parsed.guiEvent.candidates = filteredPool;
+                      parsed.guiEvent.data = { ...parsed.guiEvent.data, candidates: filteredPool };
+                    }
+                  }
+                  
+                  // [FIX] 2. 드래프트 순번 정렬 검증
+                  if (Array.isArray(teamRanks) && teamRanks.length > 0) {
+                    const sortedOrder = sortDraftOrder(teamRanks as TeamRank[]);
+                    parsed.guiEvent.teamRanks = sortedOrder;
+                    parsed.guiEvent.data = { ...parsed.guiEvent.data, draftOrder: sortedOrder };
+                  }
+                  
+                  // [FIX] 3. 지명 검증
+                  if (parsed.guiEvent.picks && Array.isArray(parsed.guiEvent.picks)) {
+                    const validatedPicks = validateDraftPicks(
+                      parsed.guiEvent.picks,
+                      (parsed.guiEvent.candidates || parsed.guiEvent.data?.candidates || []) as DraftPlayer[],
+                      10
+                    );
+                    
+                    // [FIX] 4. 소속 팀 갱신
+                    if (selectedTeam?.id) {
+                      const updatedPicks = updatePlayerTeamAffiliation(validatedPicks, selectedTeam.id);
+                      parsed.guiEvent.picks = updatedPicks;
+                      parsed.guiEvent.data = { ...parsed.guiEvent.data, picks: updatedPicks };
+                    }
+                  }
+                } catch (draftError) {
+                  console.error('[DraftService] 드래프트 검증 오류:', draftError);
+                }
+              }
+              
+              setGuiEvent(parsed.guiEvent);
               // 모달을 표시하지 않고 채팅으로만 표시
             }
           } else {
@@ -746,72 +861,177 @@ ${difficultyConfig}
     setRandomEvent(null);
   };
 
-  // 시설 업그레이드
+  // [FIX] 시설 업그레이드 - FacilityService 사용
   const handleFacilityUpgrade = (type: FacilityType) => {
     const facility = facilities[type];
-    const definition = FACILITY_DEFINITIONS.find((f) => f.type === type);
     
-    if (!definition) {
-      console.error(`[시설 업그레이드] 정의를 찾을 수 없습니다: ${type}`);
-      return;
-    }
-    
-    if (facility.level >= definition.maxLevel) {
-      console.warn(`[시설 업그레이드] 이미 최대 레벨입니다: ${type} (Lv.${facility.level})`);
-      return;
-    }
-    
-    const upgradeCost = definition.upgradeCost(facility.level);
-    
-    if (gameState.budget === null) {
-      console.warn('[시설 업그레이드] 자금 정보가 없습니다.');
-      return;
-    }
-    
-    if (gameState.budget < upgradeCost) {
-      console.warn(`[시설 업그레이드] 자금이 부족합니다. 필요: ${(upgradeCost / 100000000).toFixed(1)}억 원, 보유: ${(gameState.budget / 100000000).toFixed(1)}억 원`);
-      return;
-    }
-    
-    setGameState((prev) => ({
-      ...prev,
-      budget: prev.budget! - upgradeCost,
-    }));
-    
-    setFacilities((prev) => ({
-      ...prev,
-      [type]: {
-        ...prev[type],
-        level: prev[type].level + 1,
-      },
-    }));
-    
-    playSound('coin');
-    console.log(`[시설 업그레이드] ${definition.name} Lv.${facility.level} → Lv.${facility.level + 1} (비용: ${(upgradeCost / 100000000).toFixed(1)}억 원)`);
+    // [FIX] FacilityService를 사용하여 업그레이드 처리
+    import('../services/FacilityService').then(({ getFacilityService }) => {
+      const facilityService = getFacilityService();
+      
+      const result = facilityService.upgradeFacility(
+        type,
+        facility.level,
+        gameState.budget,
+        (newBudget) => {
+          // [FIX] 실제 유저 자금(Budget) 상태 업데이트 - UI에 즉시 반영
+          setGameState((prev) => ({
+            ...prev,
+            budget: newBudget,
+          }));
+        }
+      );
+
+      if (result.success) {
+        // [FIX] 시설 레벨 업데이트
+        setFacilities((prev) => ({
+          ...prev,
+          [type]: {
+            ...prev[type],
+            level: result.newLevel,
+          },
+        }));
+        
+        playSound('coin');
+      } else {
+        console.warn(`[시설 업그레이드] 실패: ${result.error}`);
+        if (result.error) {
+          alert(result.error);
+        }
+      }
+    });
   };
 
-  // 저장 기능
-  const handleSave = useCallback(() => {
+  // [NEW] 게임 데이터 추출 (공통 함수)
+  const getSaveData = useCallback(() => {
+    return {
+      messages: messagesRef.current,
+      gameState,
+      facilities,
+      newsItems,
+      readNewsCount,
+      selectedTeam: selectedTeam,
+      pendingOptions: pendingOptions,
+      difficulty: difficulty,
+      timestamp: new Date().toISOString(),
+      metadata: {
+        lastModified: Date.now(),
+      },
+    };
+  }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, pendingOptions, difficulty]);
+
+  // [NEW] 파일로 저장 (백업)
+  const handleSaveToFile = useCallback(async () => {
     try {
-      const saveData = {
-        messages: messagesRef.current,
-        gameState,
-        facilities,
-        newsItems,
-        readNewsCount, // 읽은 뉴스 개수도 저장
-        selectedTeam: selectedTeam, // 팀 전체 정보 저장
-        pendingOptions: pendingOptions, // 지시사항 버튼을 위한 옵션 저장
-        difficulty: difficulty, // 난이도 저장
-        timestamp: new Date().toISOString(),
-      };
+      const saveData = getSaveData();
+      
+      const { FileStorageStrategy } = await import('../services/FileStorageStrategy');
+      FileStorageStrategy.exportSaveFile(saveData);
+      
+      playSound('success');
+      alert('파일이 다운로드되었습니다!\n\n파일을 Google Drive, Dropbox 등에 업로드하면 다른 기기에서 사용할 수 있습니다.');
+    } catch (e) {
+      console.error('파일 저장 오류:', e);
+      alert('파일 저장에 실패했습니다.');
+    }
+  }, [getSaveData, playSound]);
+
+  // [NEW] 파일에서 불러오기
+  const handleLoadFromFile = useCallback(async () => {
+    try {
+      const { FileStorageStrategy } = await import('../services/FileStorageStrategy');
+      const input = FileStorageStrategy.createFileUploadInput(
+        (data) => {
+          try {
+            // [NEW] 필수 데이터 검증
+            if (!data || typeof data !== 'object') {
+              alert('저장 데이터가 올바른 형식이 아닙니다.\n\n올바른 세이브 파일을 선택해주세요.');
+              return;
+            }
+            
+            // [NEW] 메시지 데이터 검증
+            if (!data.messages || !Array.isArray(data.messages)) {
+              alert('저장 데이터에 메시지 정보가 없습니다.\n\n게임을 불러올 수 없습니다.');
+              return;
+            }
+            
+            if (data.messages.length === 0) {
+              alert('저장 데이터에 게임 진행 정보가 없습니다.\n\n새 게임을 시작해주세요.');
+              return;
+            }
+            
+            // [NEW] 게임 상태 검증
+            if (!data.gameState || typeof data.gameState !== 'object') {
+              alert('저장 데이터에 게임 상태 정보가 없습니다.\n\n게임을 불러올 수 없습니다.');
+              return;
+            }
+            
+            // [NEW] 데이터 복원
+            setMessages(data.messages);
+            messagesRef.current = data.messages;
+            
+            if (data.gameState) {
+              setGameState({
+                ...data.gameState,
+                difficulty: data.gameState.difficulty || difficulty,
+              });
+            }
+            if (data.facilities) {
+              setFacilities(data.facilities);
+            }
+            if (data.newsItems) {
+              setNewsItems(data.newsItems);
+            }
+            if (data.readNewsCount !== undefined) {
+              setReadNewsCount(data.readNewsCount);
+            }
+            if (data.pendingOptions) {
+              setPendingOptions(data.pendingOptions);
+            }
+            
+            playSound('success');
+            alert('게임이 불러와졌습니다!');
+          } catch (validationError) {
+            console.error('[ChatInterface] 데이터 검증 오류:', validationError);
+            const errorMessage = validationError instanceof Error ? validationError.message : '알 수 없는 오류';
+            alert(`게임 데이터 검증에 실패했습니다.\n\n오류: ${errorMessage}`);
+          }
+        },
+        (error) => {
+          console.error('[ChatInterface] 파일 불러오기 오류:', error);
+          const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+          alert(`파일을 불러오는데 실패했습니다.\n\n오류: ${errorMessage}\n\n올바른 세이브 파일인지 확인해주세요.`);
+        }
+      );
+      
+      input.click();
+    } catch (error) {
+      console.error('[ChatInterface] 파일 선택 오류:', error);
+      const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+      alert(`파일 선택에 실패했습니다.\n\n오류: ${errorMessage}`);
+    }
+  }, [difficulty, playSound]);
+
+  // 로컬 저장 기능
+  const handleLocalSave = useCallback(() => {
+    try {
+      const saveData = getSaveData();
+      
+      // [NEW] 로컬 저장소에 저장
       localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+      
       playSound('success');
       alert('게임이 저장되었습니다!');
     } catch (e) {
       console.error('저장 오류:', e);
       alert('저장에 실패했습니다.');
     }
-  }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, pendingOptions, difficulty, playSound]);
+  }, [getSaveData, playSound]);
+
+  // 저장 기능 (기존 호환성 유지)
+  const handleSave = useCallback(() => {
+    handleLocalSave();
+  }, [handleLocalSave]);
 
   // 불러오기 기능
   const handleLoad = useCallback(async () => {
@@ -821,26 +1041,149 @@ ${difficultyConfig}
       return;
     }
     
+    // [NEW] 파일 업로드 옵션 제공 (완전 무료 클라우드 동기화)
+    const useFileUpload = confirm(
+      '게임 불러오기\n\n' +
+      '로컬 저장소에서 불러오려면 "취소"를 누르세요.\n' +
+      '파일에서 불러오려면 "확인"을 누르세요.\n' +
+      '(Google Drive, Dropbox 등에서 다운로드한 파일)'
+    );
+    
+    if (useFileUpload) {
+      try {
+        const { FileStorageStrategy } = await import('../services/FileStorageStrategy');
+        const input = FileStorageStrategy.createFileUploadInput(
+          (data) => {
+            try {
+              // [NEW] 필수 데이터 검증
+              if (!data || typeof data !== 'object') {
+                alert('저장 데이터가 올바른 형식이 아닙니다.\n\n올바른 세이브 파일을 선택해주세요.');
+                isLoadProcessingRef.current = false;
+                return;
+              }
+              
+              // [NEW] 메시지 데이터 검증
+              if (!data.messages || !Array.isArray(data.messages)) {
+                alert('저장 데이터에 메시지 정보가 없습니다.\n\n게임을 불러올 수 없습니다.');
+                isLoadProcessingRef.current = false;
+                return;
+              }
+              
+              if (data.messages.length === 0) {
+                alert('저장 데이터에 게임 진행 정보가 없습니다.\n\n새 게임을 시작해주세요.');
+                isLoadProcessingRef.current = false;
+                return;
+              }
+              
+              // [NEW] 게임 상태 검증
+              if (!data.gameState || typeof data.gameState !== 'object') {
+                alert('저장 데이터에 게임 상태 정보가 없습니다.\n\n게임을 불러올 수 없습니다.');
+                isLoadProcessingRef.current = false;
+                return;
+              }
+              
+              // [NEW] 데이터 복원
+              setMessages(data.messages);
+              messagesRef.current = data.messages;
+              
+              if (data.gameState) {
+                setGameState({
+                  ...data.gameState,
+                  difficulty: data.gameState.difficulty || difficulty,
+                });
+              }
+              if (data.facilities) {
+                setFacilities(data.facilities);
+              }
+              if (data.newsItems) {
+                setNewsItems(data.newsItems);
+              }
+              if (data.readNewsCount !== undefined) {
+                setReadNewsCount(data.readNewsCount);
+              }
+              if (data.pendingOptions) {
+                setPendingOptions(data.pendingOptions);
+              }
+              
+              playSound('success');
+              alert('게임이 불러와졌습니다!');
+              isLoadProcessingRef.current = false;
+            } catch (validationError) {
+              console.error('[ChatInterface] 데이터 검증 오류:', validationError);
+              const errorMessage = validationError instanceof Error ? validationError.message : '알 수 없는 오류';
+              alert(`게임 데이터 검증에 실패했습니다.\n\n오류: ${errorMessage}`);
+              isLoadProcessingRef.current = false;
+            }
+          },
+          (error) => {
+            console.error('[ChatInterface] 파일 불러오기 오류:', error);
+            const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+            alert(`파일을 불러오는데 실패했습니다.\n\n오류: ${errorMessage}\n\n올바른 세이브 파일인지 확인해주세요.`);
+            isLoadProcessingRef.current = false;
+          }
+        );
+        
+        input.click();
+        return;
+      } catch (error) {
+        console.error('[ChatInterface] 파일 선택 오류:', error);
+        const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+        alert(`파일 선택에 실패했습니다.\n\n오류: ${errorMessage}`);
+        isLoadProcessingRef.current = false;
+        return;
+      }
+    }
+    
     isLoadProcessingRef.current = true;
     
     try {
       const savedData = localStorage.getItem(SAVE_KEY);
       if (!savedData) {
-        alert('저장된 게임이 없습니다.');
+        alert('저장된 게임이 없습니다.\n\n새 게임을 시작하거나 파일에서 불러오기를 시도해주세요.');
         isLoadProcessingRef.current = false;
         return;
       }
 
-      const parsed = JSON.parse(savedData);
+      let parsed;
+      try {
+        parsed = JSON.parse(savedData);
+      } catch (parseError) {
+        console.error('[ChatInterface] JSON 파싱 오류:', parseError);
+        alert('저장 데이터를 읽을 수 없습니다.\n\n파일이 손상되었거나 올바른 형식이 아닙니다.');
+        isLoadProcessingRef.current = false;
+        return;
+      }
+      
+      // [NEW] 필수 데이터 검증
+      if (!parsed || typeof parsed !== 'object') {
+        alert('저장 데이터가 올바른 형식이 아닙니다.\n\n올바른 세이브 파일이 아닙니다.');
+        isLoadProcessingRef.current = false;
+        return;
+      }
       
       if (!parsed.messages || !Array.isArray(parsed.messages)) {
-        alert('저장 데이터가 손상되었습니다.');
+        alert('저장 데이터에 메시지 정보가 없습니다.\n\n게임을 불러올 수 없습니다.');
+        isLoadProcessingRef.current = false;
+        return;
+      }
+      
+      if (parsed.messages.length === 0) {
+        alert('저장 데이터에 게임 진행 정보가 없습니다.\n\n새 게임을 시작해주세요.');
+        isLoadProcessingRef.current = false;
+        return;
+      }
+      
+      // [NEW] 게임 상태 검증
+      if (!parsed.gameState || typeof parsed.gameState !== 'object') {
+        alert('저장 데이터에 게임 상태 정보가 없습니다.\n\n게임을 불러올 수 없습니다.');
+        isLoadProcessingRef.current = false;
         return;
       }
 
       // 모델이 준비되지 않았으면 대기
       if (!modelRef.current) {
         alert('API 연결을 기다리는 중입니다. 잠시 후 다시 시도해주세요.');
+        isLoadProcessingRef.current = false;
         return;
       }
 
@@ -958,14 +1301,12 @@ ${difficultyConfig}
 
       playSound('success');
       alert('게임을 불러왔습니다!');
+      isLoadProcessingRef.current = false;
     } catch (e) {
-      console.error('불러오기 오류:', e);
-      alert('불러오기에 실패했습니다.');
-    } finally {
-      // 중복 방지 플래그 해제 (약간의 지연을 두어 상태 업데이트 완료 보장)
-      setTimeout(() => {
-        isLoadProcessingRef.current = false;
-      }, 500);
+      console.error('[ChatInterface] 불러오기 오류:', e);
+      const errorMessage = e instanceof Error ? e.message : '알 수 없는 오류';
+      alert(`게임 불러오기에 실패했습니다.\n\n오류: ${errorMessage}\n\n새 게임을 시작하거나 파일에서 불러오기를 시도해주세요.`);
+      isLoadProcessingRef.current = false;
     }
   }, [playSound]);
 
@@ -1015,8 +1356,8 @@ ${difficultyConfig}
         difficulty={difficulty}
         salaryCapUsage={gameState.salaryCapUsage}
         onApiKeyClick={onResetApiKey}
-        onSaveClick={handleSave}
-        onLoadClick={handleLoad}
+        onSaveClick={() => setIsSettingsModalOpen(true)}
+        onLoadClick={() => setIsSettingsModalOpen(true)}
       />
 
       {/* 메인 - 채팅 영역 */}
@@ -1034,7 +1375,7 @@ ${difficultyConfig}
       </div>
 
       {/* 푸터 - 입력 영역 */}
-      <div className="border-t-2 border-baseball-green/20 bg-gradient-to-b from-gray-50 to-white shadow-2xl">
+      <div className="border-t-2 border-baseball-green/20 bg-gradient-to-b from-gray-50 to-white shadow-2xl mobile-input-container">
         {/* 선택지 버튼 패널 제거됨 - 모달로 대체 */}
 
         {/* 입력 폼 */}
@@ -1084,7 +1425,7 @@ ${difficultyConfig}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="명령을 입력하세요..."
-              className="flex-1 px-3 sm:px-4 md:px-5 py-3 sm:py-3.5 text-base sm:text-base border-2 border-baseball-green/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green/50 focus:border-baseball-green disabled:bg-gray-100 font-sans shadow-sm focus:shadow-md transition-all touch-manipulation min-h-[44px]"
+              className="flex-1 px-3 sm:px-4 md:px-5 py-3 sm:py-3.5 text-base sm:text-base border-2 border-baseball-green/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green/50 focus:border-baseball-green disabled:bg-gray-100 font-sans shadow-sm focus:shadow-md transition-all touch-manipulation min-h-[44px] mobile-input"
               disabled={isLoading}
               autoComplete="off"
               autoCorrect="off"
@@ -1160,6 +1501,16 @@ ${difficultyConfig}
         facilities={facilities}
         budget={gameState.budget}
         onUpgrade={handleFacilityUpgrade}
+      />
+
+      {/* 설정 모달 */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        onSaveToFile={handleSaveToFile}
+        onLoadFromFile={handleLoadFromFile}
+        onLocalSave={handleLocalSave}
+        onLocalLoad={handleLoad}
       />
 
     </div>

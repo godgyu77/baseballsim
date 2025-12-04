@@ -1,3 +1,5 @@
+import { processNewsItems } from './newsUtils';
+
 export interface ParsedMessage {
   text: string;
   options: Array<{ label: string; value: string }>;
@@ -22,6 +24,11 @@ export interface StatusInfo {
 export interface NewsItem {
   title: string;
   content: string;
+  type?: string;
+  playerId?: string;
+  playerName?: string;
+  fromTeam?: string;
+  toTeam?: string;
 }
 
 export type GamePhase = 'TEAM_SELECTION' | 'MAIN_GAME' | 'EVENT_MODAL' | 'NEGOTIATION' | 'RANDOM_EVENT' | 'FACILITY_MANAGEMENT';
@@ -436,10 +443,29 @@ export function parseAIResponse(message: string): ParsedMessage {
         news.push({
           title: newsJson.title,
           content: newsJson.content,
+          type: newsJson.type,
+          playerId: newsJson.playerId,
+          playerName: newsJson.playerName,
+          fromTeam: newsJson.fromTeam,
+          toTeam: newsJson.toTeam,
         });
       }
     } catch (e) {
       console.warn('NEWS 파싱 오류:', e);
+    }
+  }
+  
+  // [FIX] 중복 이적 뉴스 방지 - 뉴스 생성 트랜잭션 처리
+  if (news.length > 0) {
+    try {
+      // [FIX] 뉴스 생성 트랜잭션 처리 (중복 이적 뉴스 방지)
+      const processedNews = processNewsItems(news);
+      // 처리된 뉴스로 교체 (중복 제거됨)
+      news.length = 0;
+      news.push(...processedNews);
+    } catch (e) {
+      console.warn('[NewsService] 뉴스 필터링 오류:', e);
+      // 오류 발생 시 원본 뉴스 유지
     }
   }
   

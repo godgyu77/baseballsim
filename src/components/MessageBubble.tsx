@@ -130,7 +130,10 @@ function MessageBubble({
                         minWidth: 'max-content', 
                         display: 'inline-block', 
                         width: 'max-content',
-                        verticalAlign: 'top'
+                        verticalAlign: 'top',
+                        maxHeight: '500px',
+                        overflowY: 'auto',
+                        overflowX: 'auto'
                       }}
                     >
                       <table 

@@ -24,30 +24,13 @@ export default function StartScreen({ onLoadGame, onStartNew }: StartScreenProps
     
     isProcessingRef.current = true;
     
-    try {
-      const savedData = localStorage.getItem('baseball_game_save');
-      if (savedData) {
-        try {
-          const parsed = JSON.parse(savedData);
-          if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
-            onLoadGame();
-            // 약간의 지연 후 플래그 해제
-            setTimeout(() => {
-              isProcessingRef.current = false;
-            }, 1000);
-            return;
-          }
-        } catch (e) {
-          // 파싱 오류
-          isProcessingRef.current = false;
-        }
-      }
-      alert('저장된 데이터가 없습니다.');
+    // [NEW] 설정 모달 열기 (로컬/파일 선택)
+    onLoadGame();
+    
+    // 약간의 지연 후 플래그 해제
+    setTimeout(() => {
       isProcessingRef.current = false;
-    } catch (error) {
-      console.error('불러오기 처리 오류:', error);
-      isProcessingRef.current = false;
-    }
+    }, 500);
   };
 
   return (
