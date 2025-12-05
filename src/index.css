@@ -365,3 +365,56 @@ div[class*="overflow-x-auto"] > div {
   }
 }
 
+/* 4K 모니터 성능 최적화 (1920px 이상) */
+@media (min-width: 1921px) {
+  /* Shadow Reduction: box-shadow 제거하고 얇은 테두리로 대체 */
+  * {
+    box-shadow: none !important;
+  }
+  
+  /* 얇은 테두리로 입체감 유지 */
+  .shadow-sm,
+  .shadow-md,
+  .shadow-lg,
+  .shadow-xl,
+  .shadow-2xl {
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+  }
+  
+  /* GPU Acceleration: 주요 요소에 GPU 가속 적용 */
+  body,
+  #root,
+  .glass,
+  .glass-dark,
+  [class*="message-bubble"],
+  [class*="MessageBubble"],
+  [class*="overflow-y-auto"] {
+    transform: translateZ(0);
+    will-change: transform;
+    -webkit-transform: translateZ(0);
+    -moz-transform: translateZ(0);
+    -ms-transform: translateZ(0);
+  }
+  
+  /* Shape Simplification: border-radius 줄이기 */
+  .rounded-lg,
+  .rounded-xl,
+  .rounded-2xl,
+  .rounded-3xl {
+    border-radius: 0.375rem !important; /* 6px */
+  }
+  
+  .rounded-full {
+    border-radius: 50% !important;
+  }
+  
+  /* 스크롤 영역 최적화 */
+  [class*="overflow-y-auto"],
+  [class*="overflow-x-auto"] {
+    -webkit-overflow-scrolling: touch;
+    transform: translateZ(0);
+    will-change: scroll-position;
+  }
+}
+

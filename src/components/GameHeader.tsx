@@ -1,4 +1,4 @@
-import { Calendar, DollarSign, Building2, Trophy, KeyRound, Save, FolderOpen } from 'lucide-react';
+import { Calendar, DollarSign, Building2, Trophy, KeyRound, Database, Receipt, MonitorPlay } from 'lucide-react';
 import { Difficulty } from '../constants/GameConfig';
 import { getTeamNickname } from '../lib/utils';
 
@@ -10,8 +10,10 @@ interface GameHeaderProps {
   difficulty?: Difficulty;
   salaryCapUsage?: number; // 샐러리캡 소진율 (0.0 ~ 100.0)
   onApiKeyClick?: () => void;
-  onSaveClick?: () => void;
-  onLoadClick?: () => void;
+  onSaveLoadClick?: () => void;
+  onStandingsClick?: () => void;
+  onTransactionClick?: () => void;
+  onResultClick?: () => void;
 }
 
 export default function GameHeader({ 
@@ -22,8 +24,10 @@ export default function GameHeader({
   difficulty,
   salaryCapUsage,
   onApiKeyClick,
-  onSaveClick,
-  onLoadClick
+  onSaveLoadClick,
+  onStandingsClick,
+  onTransactionClick,
+  onResultClick
 }: GameHeaderProps) {
   // budget이 null이거나 0이면 "시즌 준비 중" 표시
   const displayBudget = (budget !== null && budget > 0) ? budget.toLocaleString('ko-KR') + '원' : '시즌 준비 중';
@@ -58,29 +62,58 @@ export default function GameHeader({
               <Trophy className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span className="text-xs sm:text-sm font-semibold">{season}</span>
             </div>
+            {/* 경영 대시보드 버튼 (순위표, 장부, 경기 결과) */}
+            {(onStandingsClick || onTransactionClick || onResultClick) && (
+              <>
+                <span className="hidden sm:inline text-baseball-gold/60">|</span>
+                <div className="hidden sm:flex items-center gap-0.5 sm:gap-1">
+                  {onStandingsClick && (
+                    <button
+                      onClick={onStandingsClick}
+                      className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors touch-manipulation min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center group"
+                      title="리그 순위표"
+                    >
+                      <Trophy className="w-4 h-4 sm:w-4 sm:h-4 text-white group-hover:text-baseball-gold transition-colors" />
+                      <span className="hidden lg:inline ml-1 text-xs text-white group-hover:text-baseball-gold transition-colors">순위표</span>
+                    </button>
+                  )}
+                  {onTransactionClick && (
+                    <button
+                      onClick={onTransactionClick}
+                      className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors touch-manipulation min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center group"
+                      title="거래 내역"
+                    >
+                      <Receipt className="w-4 h-4 sm:w-4 sm:h-4 text-white group-hover:text-baseball-gold transition-colors" />
+                      <span className="hidden lg:inline ml-1 text-xs text-white group-hover:text-baseball-gold transition-colors">장부</span>
+                    </button>
+                  )}
+                  {onResultClick && (
+                    <button
+                      onClick={onResultClick}
+                      className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors touch-manipulation min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center group"
+                      title="최근 경기 결과"
+                    >
+                      <MonitorPlay className="w-4 h-4 sm:w-4 sm:h-4 text-white group-hover:text-baseball-gold transition-colors" />
+                      <span className="hidden lg:inline ml-1 text-xs text-white group-hover:text-baseball-gold transition-colors">경기 결과</span>
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
           
           {/* 오른쪽: 버튼 및 정보 (모바일에서는 자금 정보 제거) */}
           <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 lg:gap-4 flex-shrink-0">
             {/* 저장/불러오기 및 API 키 설정 버튼 */}
-            {(onSaveClick || onLoadClick || onApiKeyClick) && (
+            {(onSaveLoadClick || onApiKeyClick) && (
               <div className="flex items-center gap-0.5 sm:gap-1 md:gap-2 border-r border-baseball-gold/40 pr-0.5 sm:pr-1 md:pr-2 lg:pr-4">
-                {onSaveClick && (
+                {onSaveLoadClick && (
                   <button
-                    onClick={onSaveClick}
+                    onClick={onSaveLoadClick}
                     className="p-1.5 sm:p-1.5 md:p-2 hover:bg-white/10 rounded transition-colors touch-manipulation min-w-[36px] min-h-[36px] sm:min-w-[40px] sm:min-h-[40px] flex items-center justify-center"
-                    title="게임 저장"
+                    title="저장 / 불러오기"
                   >
-                    <Save className="w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5 text-baseball-gold" />
-                  </button>
-                )}
-                {onLoadClick && (
-                  <button
-                    onClick={onLoadClick}
-                    className="p-1.5 sm:p-1.5 md:p-2 hover:bg-white/10 rounded transition-colors touch-manipulation min-w-[36px] min-h-[36px] sm:min-w-[40px] sm:min-h-[40px] flex items-center justify-center"
-                    title="게임 불러오기"
-                  >
-                    <FolderOpen className="w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5 text-baseball-gold" />
+                    <Database className="w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5 text-baseball-gold" />
                   </button>
                 )}
                 {onApiKeyClick && (

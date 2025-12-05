@@ -13,8 +13,11 @@ import NewsSidebar, { NewsItem } from './NewsSidebar';
 import TransactionModal from './TransactionModal';
 import StandingsModal from './StandingsModal';
 import GameResultModal from './GameResultModal';
+import SaveLoadModal from './SaveLoadModal';
 import { useToast } from '../context/ToastContext';
-import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo, Transaction, validateBudgetIntegrity, Player, validateRosterIntegrity, extractPlayerNamesFromInitialData, GameResult, TeamRecord } from '../lib/utils';
+import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo, Transaction, validateBudgetIntegrity, Player, validateRosterIntegrity, extractPlayerNamesFromInitialData, GameResult, TeamRecord, isDuplicateTransaction, deduplicateTransactions, generateTransactionId } from '../lib/utils';
+import { retryRequest } from '../lib/retryUtils';
+import { debounce } from '../lib/debounce';
 import { filterProtectedPlayers, validateDraftPicks, updatePlayerTeamAffiliation, sortDraftOrder, createDraftPool, DraftPlayer, ProtectedPlayer, TeamRank } from '../lib/draftUtils';
 import { getInitialBudget } from '../constants/GameConfig';
 import { Team } from '../constants/TeamData';
@@ -23,10 +26,13 @@ import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
 import { createInitialFacilityState, FACILITY_DEFINITIONS } from '../constants/Facilities';
 import { Difficulty } from '../constants/GameConfig';
+import { GameSaveData } from '../services/StorageService';
+import { FileStorageStrategy } from '../services/FileStorageStrategy';
 
 interface Message {
   text: string;
   isUser: boolean;
+  isStreaming?: boolean; // [Performance] 스트리밍 중 표시 플래그
 }
 
 interface ChatInterfaceProps {
@@ -78,6 +84,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
   const [isNewsOpen, setIsNewsOpen] = useState(false);
   const [readNewsCount, setReadNewsCount] = useState(0); // 읽은 뉴스 개수 추적
   const [hasCheckedLoadGame, setHasCheckedLoadGame] = useState(false); // 불러오기 시 옵션 체크 플래그
+  const [hasStartedStreaming, setHasStartedStreaming] = useState(false); // 스트리밍 시작 여부 (스켈레톤 제어용)
   // [Money-Validation] 자금 무결성 검증 로직 추가 - 거래 내역 관리
   const [transactionHistory, setTransactionHistory] = useState<Transaction[]>([]);
   // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 상태 관리
@@ -88,6 +95,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
   // 모달 상태 관리
   const [isTransactionOpen, setIsTransactionOpen] = useState(false);
   const [isStandingsOpen, setIsStandingsOpen] = useState(false);
+  const [isSaveLoadModalOpen, setIsSaveLoadModalOpen] = useState(false);
   const [isResultOpen, setIsResultOpen] = useState(false);
   const { showToast } = useToast(); // Toast 알림 훅
   const isLoadProcessingRef = useRef(false); // 불러오기 중복 방지 플래그
@@ -96,24 +104,45 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
   const modelRef = useRef<any>(null);
   const messagesRef = useRef<Message[]>([]);
   const isLoadingRef = useRef(false);
-  const handleSendRef = useRef<((messageText: string) => Promise<void>) | null>(null);
+  const handleSendRef = useRef<((messageText: string, options?: { hideFromUI?: boolean; displayMessage?: string }) => Promise<void>) | null>(null);
   const { playSound } = useSound();
 
   // handleSend 함수를 최상단으로 이동 (TDZ 문제 해결)
-  const handleSend = useCallback(async (messageText: string) => {
-    if (!messageText.trim() || isLoadingRef.current) return;
+  const handleSend = useCallback(async (messageText: string, options?: { hideFromUI?: boolean; displayMessage?: string }) => {
+    // 빈 값 방어 코드 추가
+    if (!messageText || !messageText.trim() || isLoadingRef.current) {
+      console.warn('[handleSend] 메시지가 비어있거나 이미 로딩 중입니다.');
+      return;
+    }
 
+    console.log('[handleSend] 시작', { hideFromUI: options?.hideFromUI, messageLength: messageText.length });
     playSound('click');
     const userMessage = messageText.trim();
+    const displayMessage = options?.displayMessage || userMessage; // 화면에 표시할 메시지
+    const hideFromUI = options?.hideFromUI || false; // UI에 표시하지 않을지 여부
     setInput('');
     
     // 신생 구단인 경우 구단 이름은 expansionTeamData에서 받은 값으로 고정 (절대 변경하지 않음)
     // AI 응답이나 사용자 메시지에서 구단명을 추출해도 업데이트하지 않음
     
-    // 사용자 메시지를 먼저 추가
-    setMessages((prev) => [...prev, { text: userMessage, isUser: true }]);
+    // 사용자 메시지를 화면에 추가 (hideFromUI가 false인 경우만)
+    // [4K 최적화] 메시지 개수 제한 (최대 150개 유지)
+    if (!hideFromUI) {
+      setMessages((prev) => {
+        const newMessages = [...prev, { text: displayMessage, isUser: true }];
+        return newMessages.length > 150 ? newMessages.slice(-150) : newMessages;
+      });
+    }
     
-    // 로딩 시작 (임시 말풍선은 추가하지 않음)
+    // messagesRef 업데이트 (API 히스토리 생성을 위해 실제 전송할 메시지 저장)
+    // hideFromUI가 true여도 API 히스토리를 위해 messagesRef에는 실제 메시지 저장
+    messagesRef.current = [...messagesRef.current, { text: userMessage, isUser: true }];
+    if (messagesRef.current.length > 150) {
+      messagesRef.current = messagesRef.current.slice(-150);
+    }
+    
+    // [UX Optimization] 로딩 오버레이 제거 - 스트리밍 텍스트가 자연스럽게 나타나도록
+    // isLoading은 입력 필드 비활성화에만 사용 (로딩 오버레이 표시 안 함)
     setIsLoading(true);
     setCurrentOptions([]);
     setLoadingStatusText(undefined);
@@ -121,9 +150,11 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
 
     try {
       if (!modelRef.current) {
+        console.error('[handleSend] modelRef.current가 null입니다.');
         throw new Error('모델이 초기화되지 않았습니다.');
       }
 
+      console.log('[handleSend] 모델 확인 완료, 채팅 인스턴스 생성 중...');
       // 채팅 인스턴스가 없으면 새로 생성
       // messagesRef를 사용하여 최신 메시지 목록 참조 (방금 추가한 사용자 메시지 포함)
       if (!chatInstanceRef.current) {
@@ -138,7 +169,8 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           ? currentMessages.filter((_, idx) => idx === 0 ? false : true) // 첫 번째 AI 메시지 제거
           : currentMessages;
         
-        // 사용자 메시지를 제외한 히스토리 생성 (방금 추가한 사용자 메시지 제외)
+        // 사용자 메시지를 제외한 히스토리 생성
+        // hideFromUI가 true인 경우 방금 추가한 메시지가 없으므로 filteredMessages 그대로 사용
         const history = filteredMessages.length > 0
           ? filteredMessages.map(msg => ({
               role: msg.isUser ? 'user' : 'model',
@@ -154,10 +186,33 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
         chatInstanceRef.current = modelRef.current.startChat({
           history: safeHistory, // 안전한 history 사용
         });
+        console.log('[handleSend] 채팅 인스턴스 생성 완료');
       }
 
-      const result = await chatInstanceRef.current.sendMessageStream(userMessage);
+      console.log('[handleSend] API 호출 시작...', { messageLength: userMessage.length });
+      
+      // [Auto-Retry] API 호출에 재시도 로직 적용
+      const result = await retryRequest(
+        async () => {
+          return await chatInstanceRef.current.sendMessageStream(userMessage);
+        },
+        {
+          maxRetries: 3,
+          onRetry: (attempt, error) => {
+            console.warn(`[Auto-Retry] 메시지 전송 재시도 ${attempt}/3:`, error);
+            // UI 피드백: 재시도 중 상태 표시
+            setLoadingStatusText(`연결 재시도 중... (${attempt}/3)`);
+          },
+        }
+      );
+      
+      console.log('[handleSend] API 호출 성공, 스트리밍 시작...');
       let fullText = '';
+      let lastUpdateTime = 0;
+      const UPDATE_THROTTLE_MS = 150; // [Performance] UI 업데이트 Throttle (150ms)
+      
+      // 스트리밍 시작 전 상태로 리셋
+      setHasStartedStreaming(false);
 
       try {
         for await (const chunk of result.stream) {
@@ -165,6 +220,44 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
             const chunkText = chunk.text();
             if (chunkText) {
               fullText += chunkText;
+              
+              // [UX Optimization] 첫 chunk 도착 시 즉시 텍스트 표시 시작
+              // 로딩 오버레이 없이 자연스럽게 텍스트가 나타나도록
+              if (!hasStartedStreaming) {
+                setHasStartedStreaming(true);
+                // isLoading은 입력 필드 비활성화에만 사용 (로딩 오버레이는 표시 안 함)
+                console.log('[UX Optimization] 첫 chunk 도착, 스트리밍 텍스트 표시 시작');
+              }
+              
+              // [Performance Optimization] Progressive Rendering: 스트리밍 중 실시간 UI 업데이트
+              // Throttle 적용: 150ms마다 한 번씩만 UI 업데이트 (과도한 리렌더링 방지)
+              const now = Date.now();
+              if (now - lastUpdateTime >= UPDATE_THROTTLE_MS) {
+                lastUpdateTime = now;
+                
+                // 실시간으로 메시지 업데이트 (파싱 없이 텍스트만 표시)
+                setMessages((prev) => {
+                  const lastMessage = prev[prev.length - 1];
+                  // 마지막 메시지가 AI 메시지이고 스트리밍 중이면 업데이트
+                  if (lastMessage && !lastMessage.isUser && lastMessage.isStreaming) {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = { 
+                      text: fullText, 
+                      isUser: false,
+                      isStreaming: true  // 스트리밍 중 표시
+                    };
+                    return updated;
+                  } else {
+                    // 새 스트리밍 메시지 추가
+                    const newMessages = [...prev, { 
+                      text: fullText, 
+                      isUser: false, 
+                      isStreaming: true 
+                    }];
+                    return newMessages.length > 150 ? newMessages.slice(-150) : newMessages;
+                  }
+                });
+              }
               
               // 키워드 기반 상태 텍스트 업데이트 (진행률은 LoadingOverlay에서 자동 관리)
               if (fullText.includes('선수') || fullText.includes('명단')) {
@@ -175,10 +268,15 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                 setLoadingStatusText('보고서를 작성 중입니다...');
               }
               
-              // 스트리밍 중에도 옵션 파싱 시도 (내부적으로만)
-              const parsed = parseAIResponse(fullText);
-              if (parsed.options.length > 0) {
-                setCurrentOptions(parsed.options);
+              // [Performance] 스트리밍 중에도 완성된 태그만 파싱 (옵션 등)
+              // 전체 파싱은 스트리밍 완료 후 수행
+              try {
+                const parsed = parseAIResponse(fullText);
+                if (parsed.options.length > 0) {
+                  setCurrentOptions(parsed.options);
+                }
+              } catch (parseError) {
+                // 불완전한 태그는 무시 (스트리밍 중이므로 정상)
               }
             }
           } catch (chunkError) {
@@ -186,22 +284,74 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           }
         }
 
+        // [Performance Optimization] 스트리밍 루프 종료 후 마지막 업데이트 보장
+        // Throttle 때문에 마지막 chunk가 UI에 반영되지 않을 수 있으므로 강제 업데이트
+        setMessages((prev) => {
+          const lastMessage = prev[prev.length - 1];
+          if (lastMessage && !lastMessage.isUser && lastMessage.isStreaming) {
+            const updated = [...prev];
+            updated[updated.length - 1] = { 
+              text: fullText, 
+              isUser: false,
+              isStreaming: true  // 아직 스트리밍 중 (파싱 전)
+            };
+            return updated;
+          }
+          return prev;
+        });
+
         // 스트리밍 완료 후 최종 응답 확인
         const response = await result.response;
         const finalText = response.text();
         
         if (finalText && finalText !== fullText) {
           fullText = finalText;
+          
+          // 최종 텍스트가 다르면 한 번 더 업데이트
+          setMessages((prev) => {
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage && !lastMessage.isUser && lastMessage.isStreaming) {
+              const updated = [...prev];
+              updated[updated.length - 1] = { 
+                text: fullText, 
+                isUser: false,
+                isStreaming: true
+              };
+              return updated;
+            }
+            return prev;
+          });
         }
 
-        // 로딩 완료 (진행률은 LoadingOverlay에서 자동으로 100% 처리)
-        setLoadingStatusText('완료!');
+        // [UX Optimization] 스트리밍 완료 - 로딩 오버레이 없이 자연스럽게 완료
+        setLoadingStatusText(undefined);
 
         if (fullText) {
-          // 최종 메시지에서 옵션 및 GUI 이벤트 파싱
+          // [Performance Optimization] 스트리밍 완료 후 최종 파싱 및 정리
           const parsed = parseAIResponse(fullText);
-          // 파싱된 텍스트만 저장 (JSON 태그 제거된 깨끗한 텍스트)
-          setMessages((prev) => [...prev, { text: parsed.text, isUser: false }]);
+          
+          // 파싱된 텍스트로 업데이트 (태그 제거, 스트리밍 완료 표시)
+          // [4K 최적화] 메시지 개수 제한 (최대 150개 유지)
+          setMessages((prev) => {
+            const lastMessage = prev[prev.length - 1];
+            // 마지막 메시지가 스트리밍 중이면 업데이트, 아니면 새로 추가
+            if (lastMessage && !lastMessage.isUser && lastMessage.isStreaming) {
+              const updated = [...prev];
+              updated[updated.length - 1] = { 
+                text: parsed.text,  // 파싱된 깨끗한 텍스트
+                isUser: false,
+                isStreaming: false  // 스트리밍 완료
+              };
+              return updated;
+            } else {
+              const newMessages = [...prev, { 
+                text: parsed.text, 
+                isUser: false,
+                isStreaming: false 
+              }];
+              return newMessages.length > 150 ? newMessages.slice(-150) : newMessages;
+            }
+          });
           
           // STATUS 태그 처리 (헤더 업데이트)
           if (parsed.status) {
@@ -230,7 +380,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                     
                     // 거래 내역에 기록
                     const transaction: Transaction = {
-                      id: `ai-report-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                      id: generateTransactionId('ai-report'),
                       date: parsed.status!.date || new Date().toISOString(),
                       amount: aiReportedBudget - clientCalculatedBudget, // 변동 금액
                       category: 'AI_REPORT',
@@ -238,7 +388,14 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                       balanceAfter: aiReportedBudget,
                     };
                     
-                    setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+                    // [Fix - Deduplication] 중복 체크 후 추가
+                    setTransactionHistory(prevHistory => {
+                      if (isDuplicateTransaction(transaction, prevHistory)) {
+                        console.warn('[Transaction] 중복 거래 내역 감지, 추가하지 않음:', transaction.id);
+                        return prevHistory;
+                      }
+                      return [...prevHistory, transaction];
+                    });
                     
                     // 마이너스 값도 허용 (부채 상태)
                     return { ...prev, budget: aiReportedBudget };
@@ -263,7 +420,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                 
                 // 거래 내역에 기록
                 const transaction: Transaction = {
-                  id: `finance-update-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                  id: generateTransactionId('finance-update'),
                   date: parsed.status?.date || new Date().toISOString(),
                   amount: amount,
                   category: 'FINANCE_UPDATE',
@@ -271,7 +428,14 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                   balanceAfter: newBudget,
                 };
                 
-                setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+                // [Fix - Deduplication] 중복 체크 후 추가
+                setTransactionHistory(prevHistory => {
+                  if (isDuplicateTransaction(transaction, prevHistory)) {
+                    console.warn('[Transaction] 중복 거래 내역 감지, 추가하지 않음:', transaction.id);
+                    return prevHistory;
+                  }
+                  return [...prevHistory, transaction];
+                });
                 
                 // Toast 알림: 자금 변동
                 if (amount > 0) {
@@ -569,7 +733,11 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           if (text) {
             const parsed = parseAIResponse(text);
             // 파싱된 텍스트만 저장 (JSON 태그 제거된 깨끗한 텍스트)
-            setMessages((prev) => [...prev, { text: parsed.text, isUser: false }]);
+            // [4K 최적화] 메시지 개수 제한 (최대 150개 유지)
+            setMessages((prev) => {
+              const newMessages = [...prev, { text: parsed.text, isUser: false }];
+              return newMessages.length > 150 ? newMessages.slice(-150) : newMessages;
+            });
             
             // 옵션이 있으면 플로팅 버튼만 표시 (모달은 즉시 띄우지 않음)
             if (parsed.options.length > 0) {
@@ -675,23 +843,29 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       } finally {
         setLoadingStatusText(undefined);
         setIsLoading(false);
+        setHasStartedStreaming(false); // 로딩 완료 시 리셋
       }
     } catch (error) {
       console.error('Error:', error);
       const errorMessage = error instanceof Error ? error.message : String(error) || '알 수 없는 오류';
-      setMessages((prev) => [
-        ...prev,
-        {
-          text: `오류가 발생했습니다: ${errorMessage}\n\nAPI 키와 인터넷 연결을 확인해주세요.`,
-          isUser: false,
-        },
-      ]);
+      // [4K 최적화] 메시지 개수 제한 (최대 150개 유지)
+      setMessages((prev) => {
+        const newMessages = [
+          ...prev,
+          {
+            text: `오류가 발생했습니다: ${errorMessage}\n\nAPI 키와 인터넷 연결을 확인해주세요.`,
+            isUser: false,
+          },
+        ];
+        return newMessages.length > 150 ? newMessages.slice(-150) : newMessages;
+      });
       setCurrentOptions([]);
       setPendingOptions([]);
       setLoadingStatusText(undefined);
     } finally {
       // 로딩 종료
       setIsLoading(false);
+      setHasStartedStreaming(false); // 로딩 완료 시 리셋
     }
   }, [playSound]);
 
@@ -710,7 +884,12 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
   useEffect(() => {
     if (apiKey) {
       (async () => {
-        modelRef.current = await getGeminiModel(apiKey);
+        // [Cost Optimization] 이미 모델이 있고 같은 API 키면 재사용 (중복 호출 방지)
+        if (!modelRef.current) {
+          modelRef.current = await getGeminiModel(apiKey);
+        } else {
+          console.log('[Cost Optimization] 기존 모델 인스턴스 재사용 (중복 호출 방지)');
+        }
         chatInstanceRef.current = null;
         setIsModelReady(true);
         
@@ -874,6 +1053,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
   // 게임 초기화 플래그 (중복 호출 방지)
   const isInitializingRef = useRef(false);
 
+  // handleSend가 정의된 후에 초기화 로직 실행
   useEffect(() => {
     const savedData = localStorage.getItem(SAVE_KEY);
     const hasSavedData = savedData && JSON.parse(savedData).messages?.length > 0;
@@ -892,47 +1072,41 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       setPendingOptions(prev => prev.length === 0 ? prev : []);
       setCurrentOptions(prev => prev.length === 0 ? prev : []);
       
-      // 로딩 시작
-      setIsLoading(true);
+      // [FIX] 로딩 상태는 handleSend에서 관리하므로 여기서는 설정하지 않음
+      // setIsLoading(true)를 제거하여 handleSend가 정상적으로 실행되도록 함
       setLoadingStatusText(undefined); // 롤링 텍스트 사용
       
-      // [FIX] Force Empty History to prevent API Error
-      // initializeGameWithData 호출 (팀 정보 및 난이도 포함)
-      // 주의: messages 상태를 인자로 넘기지 않음 (API 규칙 준수)
-      // initializeGameWithData 내부에서 history: []로 빈 세션을 강제로 시작하므로,
-      // 이전 UI에 있던 텍스트(Model 응답)는 절대 전달되지 않음
-      // 함수 시그니처에 _ignoredHistory가 있더라도 무시하고 빈 배열로 시작함
-      initializeGameWithData(apiKey, difficulty, selectedTeam)
-        .then((initialResponse) => {
-          // 초기 응답을 첫 메시지로 추가
-          setMessages([{ text: initialResponse, isUser: false }]);
-          messagesRef.current = [{ text: initialResponse, isUser: false }];
-          
-          // [CRITICAL FIX] initializeGameWithData는 독립적인 세션이므로
-          // 이후 handleSend에서 사용할 chatInstanceRef를 null로 유지하여
-          // 다음 메시지 전송 시 새 세션을 시작하도록 함
-          // (또는 initializeGameWithData의 세션을 재사용하려면 별도 관리 필요)
-          // 현재는 null로 두어 handleSend에서 새로 생성하도록 함
-          
-          // 신생 구단인 경우 추가 정보 전송
-          if (selectedTeam.id === 'expansion') {
-            const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
-            const difficultyCode = difficulty;
-            const difficultyConfig = difficulty === 'EASY' 
-              ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
-              : difficulty === 'NORMAL'
-              ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
-              : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
-            
-            const ownerTypeName = expansionTeamData?.ownerType === 'A' 
-              ? 'A유형: 성적 지상주의 (Win-Now)'
-              : expansionTeamData?.ownerType === 'B'
-              ? 'B유형: 비즈니스맨 (Profit-First)'
-              : expansionTeamData?.ownerType === 'C'
-              ? 'C유형: 시스템/재건 (Rebuilder)'
-              : 'D유형: 의리의 대부 (The Godfather)';
-            
-            const facilityInfo = `**[현재 시설 레벨]**
+      // isLoadingRef도 리셋하여 handleSend가 실행되도록 함
+      isLoadingRef.current = false;
+      
+      // [FIX] 팀 선택 정보를 먼저 전송하고, 그 후에 GM Office Report 생성
+      // 1단계: 사용자 메시지 표시 (팀 선택 정보)
+      const displayMessage = selectedTeam.id === 'expansion' 
+        ? `✨ 신생 구단 창단 (11구단)으로 게임을 시작합니다.`
+        : `${selectedTeam.fullName}으로 게임을 시작합니다.`;
+      
+      // 화면에 사용자 메시지 먼저 표시
+      setMessages([{ text: displayMessage, isUser: true }]);
+      
+      // 2단계: 팀 정보를 포함한 프롬프트 생성 및 전송
+      if (selectedTeam.id === 'expansion') {
+        const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
+        const difficultyCode = difficulty;
+        const difficultyConfig = difficulty === 'EASY' 
+          ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
+          : difficulty === 'NORMAL'
+          ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
+          : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
+        
+        const ownerTypeName = expansionTeamData?.ownerType === 'A' 
+          ? 'A유형: 성적 지상주의 (Win-Now)'
+          : expansionTeamData?.ownerType === 'B'
+          ? 'B유형: 비즈니스맨 (Profit-First)'
+          : expansionTeamData?.ownerType === 'C'
+          ? 'C유형: 시스템/재건 (Rebuilder)'
+          : 'D유형: 의리의 대부 (The Godfather)';
+        
+        const facilityInfo = `**[현재 시설 레벨]**
 - 훈련장: Lv.${facilities.training.level} (경험치 획득량 +${facilities.training.level * 10}%)
 - 메디컬 센터: Lv.${facilities.medical.level} (부상 확률 -${facilities.medical.level * 5}%, 회복 속도 +${facilities.medical.level * 10}%)
 - 마케팅 팀: Lv.${facilities.marketing.level} (경기당 수익 +${facilities.marketing.level * 5}%, 후원금 +${facilities.marketing.level * 3}%)
@@ -940,7 +1114,8 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
 
 위 시설 레벨에 따라 게임 로직(부상 회복 속도, 경험치 획득량, 수익 등)을 적용해주세요.`;
 
-            const teamMessage = `✨ 신생 구단 창단 (11구단)을 선택했습니다. 
+        // 내부 로직용 프롬프트 (긴 지시문) - API로만 전송
+        const fullPrompt = `✨ 신생 구단 창단 (11구단)을 선택했습니다. 
 
 **[구단 정보]**
 연고지: ${expansionTeamData?.city || '미정'}
@@ -954,23 +1129,77 @@ ${difficultyConfig}
 이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 신생 구단 창단 프로세스를 시작해주세요.
 
 ${facilityInfo}`;
+        
+        // InitialData를 포함한 전체 프롬프트 생성
+        const fullPromptWithData = `${KBO_INITIAL_DATA}
+
+${fullPrompt}
+
+[SYSTEM INSTRUCTION: INITIALIZATION OVERRIDE]
+1. The user has ALREADY selected the difficulty and team via the UI.
+2. DO NOT output "Welcome" text or ask for difficulty.
+3. DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or similar questions.
+4. IMMEDIATELY assume the role of the GM/Assistant.
+5. START THE GAME IMMEDIATELY with the <STATUS> dashboard for 2026-01-01 (2026년 1월 1주차), and <NEWS> tag right now.
+6. Output <OPTIONS> tag with game action buttons (일정 진행, 로스터 확인, etc.) immediately.
+7. Start directly with the game simulation. Skip all introductory steps and go directly to the main game screen.`;
+        
+        // [Cost Optimization] 모델 초기화 후 팀 정보 전송하여 GM Office Report 생성
+        // 이미 모델이 있으면 재사용 (중복 호출 방지)
+        const initializeModel = async () => {
+          if (!modelRef.current) {
+            modelRef.current = await getGeminiModel(apiKey);
+            setIsModelReady(true);
+          } else {
+            console.log('[Cost Optimization] 기존 모델 인스턴스 재사용 (신생 구단 초기화)');
+          }
+        };
+        
+        initializeModel()
+          .then(() => {
+            // handleSend를 직접 호출 (handleSendRef 대신)
+            // handleSend는 이미 정의되어 있으므로 직접 호출 가능
+            console.log('[초기화] 모델 준비 완료, handleSend 호출 준비...', { 
+              messageLength: fullPromptWithData.length,
+              isLoadingRef: isLoadingRef.current 
+            });
+            
+            // isLoadingRef를 명시적으로 false로 설정하여 handleSend가 실행되도록 함
+            isLoadingRef.current = false;
             
             setTimeout(() => {
-              if (handleSendRef.current) {
-                handleSendRef.current(teamMessage);
+              try {
+                console.log('[초기화] handleSend 호출 시도...', { 
+                  messageLength: fullPromptWithData.length,
+                  isLoadingRef: isLoadingRef.current 
+                });
+                // handleSend를 직접 호출
+                handleSend(fullPromptWithData, { hideFromUI: true });
+              } catch (error) {
+                console.error('[초기화] handleSend 호출 실패:', error);
+                setIsLoading(false);
+                isInitializingRef.current = false;
+                alert('게임 초기화에 실패했습니다. 페이지를 새로고침해주세요.');
               }
-            }, 500);
-          } else {
-            // 일반 구단인 경우 난이도 정보만 전송
-            const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
-            const difficultyCode = difficulty;
-            const difficultyConfig = difficulty === 'EASY' 
-              ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
-              : difficulty === 'NORMAL'
-              ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
-              : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
-            
-            const facilityInfo = `**[현재 시설 레벨]**
+            }, 300);
+          })
+          .catch((error) => {
+            console.error('게임 초기화 실패:', error);
+            alert('게임 초기화에 실패했습니다. 다시 시도해주세요.');
+            setIsLoading(false);
+            isInitializingRef.current = false;
+          });
+      } else {
+        // 일반 구단인 경우
+        const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
+        const difficultyCode = difficulty;
+        const difficultyConfig = difficulty === 'EASY' 
+          ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
+          : difficulty === 'NORMAL'
+          ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
+          : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
+        
+        const facilityInfo = `**[현재 시설 레벨]**
 - 훈련장: Lv.${facilities.training.level} (경험치 획득량 +${facilities.training.level * 10}%)
 - 메디컬 센터: Lv.${facilities.medical.level} (부상 확률 -${facilities.medical.level * 5}%, 회복 속도 +${facilities.medical.level * 10}%)
 - 마케팅 팀: Lv.${facilities.marketing.level} (경기당 수익 +${facilities.marketing.level * 5}%, 후원금 +${facilities.marketing.level * 3}%)
@@ -978,7 +1207,8 @@ ${facilityInfo}`;
 
 위 시설 레벨에 따라 게임 로직(부상 회복 속도, 경험치 획득량, 수익 등)을 적용해주세요.`;
 
-            const teamMessage = `${selectedTeam.fullName}을 선택했습니다. 
+        // 내부 로직용 프롬프트 (긴 지시문) - API로만 전송
+        const fullPrompt = `${selectedTeam.fullName}을 선택했습니다. 
 
 **[난이도 설정 - 절대 변경 금지]**
 난이도: ${difficultyMode} (${difficultyCode})
@@ -987,23 +1217,73 @@ ${difficultyConfig}
 이 난이도는 게임 진행 중 절대로 변경할 수 없습니다. 위 설정값을 정확히 적용하여 Step 3: 데이터 초기화 및 게임을 시작해주세요.
 
 ${facilityInfo}`;
+        
+        // InitialData를 포함한 전체 프롬프트 생성
+        const fullPromptWithData = `${KBO_INITIAL_DATA}
+
+${fullPrompt}
+
+[SYSTEM INSTRUCTION: INITIALIZATION OVERRIDE]
+1. The user has ALREADY selected the difficulty and team via the UI.
+2. DO NOT output "Welcome" text or ask for difficulty.
+3. DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or similar questions.
+4. IMMEDIATELY assume the role of the GM/Assistant.
+5. START THE GAME IMMEDIATELY with the <STATUS> dashboard for 2026-01-01 (2026년 1월 1주차), and <NEWS> tag right now.
+6. Output <OPTIONS> tag with game action buttons (일정 진행, 로스터 확인, etc.) immediately.
+7. Start directly with the game simulation. Skip all introductory steps and go directly to the main game screen.`;
+        
+        // [Cost Optimization] 모델 초기화 후 팀 정보 전송하여 GM Office Report 생성
+        // 이미 모델이 있으면 재사용 (중복 호출 방지)
+        const initializeModel = async () => {
+          if (!modelRef.current) {
+            modelRef.current = await getGeminiModel(apiKey);
+            setIsModelReady(true);
+          } else {
+            console.log('[Cost Optimization] 기존 모델 인스턴스 재사용 (일반 구단 초기화)');
+          }
+        };
+        
+        initializeModel()
+          .then(() => {
+            // handleSend를 직접 호출 (handleSendRef 대신)
+            // handleSend는 이미 정의되어 있으므로 직접 호출 가능
+            console.log('[초기화] 모델 준비 완료, handleSend 호출 준비...', { 
+              messageLength: fullPromptWithData.length,
+              isLoadingRef: isLoadingRef.current 
+            });
+            
+            // isLoadingRef를 명시적으로 false로 설정하여 handleSend가 실행되도록 함
+            isLoadingRef.current = false;
             
             setTimeout(() => {
-              if (handleSendRef.current) {
-                handleSendRef.current(teamMessage);
+              try {
+                console.log('[초기화] handleSend 호출 시도...', { 
+                  messageLength: fullPromptWithData.length,
+                  isLoadingRef: isLoadingRef.current 
+                });
+                // handleSend를 직접 호출
+                handleSend(fullPromptWithData, { hideFromUI: true });
+              } catch (error) {
+                console.error('[초기화] handleSend 호출 실패:', error);
+                setIsLoading(false);
+                isInitializingRef.current = false;
+                alert('게임 초기화에 실패했습니다. 페이지를 새로고침해주세요.');
               }
-            }, 500);
-          }
-          
-          setIsLoading(false);
-        })
-        .catch((error) => {
-          console.error('게임 초기화 실패:', error);
-          alert('게임 초기화에 실패했습니다. 다시 시도해주세요.');
-          setIsLoading(false);
-          isInitializingRef.current = false;
-        });
+            }, 300);
+          })
+          .catch((error) => {
+            console.error('게임 초기화 실패:', error);
+            alert('게임 초기화에 실패했습니다. 다시 시도해주세요.');
+            setIsLoading(false);
+            isInitializingRef.current = false;
+          });
+      }
+      
+      // [NOTE] setIsLoading(false)는 handleSend 내부에서 관리되므로 여기서는 제거
+      // 모델 초기화와 메시지 전송이 비동기로 실행되므로, 로딩 상태는 handleSend에서 관리
     }
+    // handleSend가 정의된 후에 실행되도록 의존성 배열에 포함
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     
     // 불러오기 시: 저장된 메시지가 복원된 후, 마지막 AI 응답에 옵션이 없으면 초기 메시지 전송
     // 한 번만 체크하도록 hasCheckedLoadGame 플래그 사용
@@ -1107,7 +1387,7 @@ ${facilityInfo}`;
           
           // 거래 내역에 기록 (AI 응답으로 업데이트하는 경우)
           const transaction: Transaction = {
-            id: `text-extract-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            id: generateTransactionId('text-extract'),
             date: parsed.status?.date || new Date().toISOString(),
             amount: extractedBudget! - clientCalculatedBudget, // 변동 금액
             category: 'AI_REPORT',
@@ -1115,7 +1395,14 @@ ${facilityInfo}`;
             balanceAfter: extractedBudget!,
           };
           
-          setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+          // [Fix - Deduplication] 중복 체크 후 추가
+          setTransactionHistory(prevHistory => {
+            if (isDuplicateTransaction(transaction, prevHistory)) {
+              console.warn('[Transaction] 중복 거래 내역 감지, 추가하지 않음:', transaction.id);
+              return prevHistory;
+            }
+            return [...prevHistory, transaction];
+          });
           
           // 그 외의 경우 (AI 응답이 더 작거나 같으면) AI 응답으로 업데이트
           console.log('[자금 파싱] ✅ 자금 업데이트:', extractedBudget!.toLocaleString('ko-KR') + '원');
@@ -1142,7 +1429,7 @@ ${facilityInfo}`;
       // 초기 자금이 설정되었고 거래 내역이 없으면 초기 Transaction 기록
       if (Math.abs(gameState.budget - initialBudget) < 10000000) { // 0.1억 이내 차이면 초기 자금으로 간주
         const initialTransaction: Transaction = {
-          id: `initial-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          id: generateTransactionId('initial'),
           date: gameState.date || new Date().toISOString(),
           amount: initialBudget,
           category: 'INITIAL',
@@ -1154,10 +1441,23 @@ ${facilityInfo}`;
     }
   }, [gameState.budget, gameState.date, difficulty, transactionHistory.length]);
 
+  // [Cost Optimization] Debounce 적용: 빠른 연속 클릭 방지
+  // [Analysis] 문제점: 사용자가 빠르게 버튼을 클릭하면 연속으로 API 호출 발생
+  // [Expected Savings]: 실수로 인한 중복 요청 90% 감소
+  const debouncedHandleSend = useRef(
+    debounce((message: string) => {
+      handleSend(message);
+    }, 300)
+  ).current;
+
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
-    handleSend(input);
-  }, [handleSend, input]);
+    if (!input.trim() || isLoadingRef.current) {
+      return; // 빈 메시지나 로딩 중이면 무시
+    }
+    // [Cost Optimization] Debounce된 함수 사용
+    debouncedHandleSend(input);
+  }, [input, debouncedHandleSend, handleSend]);
 
   const handleOptionClick = useCallback((value: string) => {
     playSound('click');
@@ -1207,7 +1507,7 @@ ${facilityInfo}`;
           
           // 거래 내역에 기록
           const transaction: Transaction = {
-            id: `random-event-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            id: generateTransactionId('random-event'),
             date: newState.date || new Date().toISOString(),
             amount: change,
             category: 'RANDOM_EVENT',
@@ -1215,7 +1515,14 @@ ${facilityInfo}`;
             balanceAfter: newState.budget,
           };
           
-          setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+          // [Fix - Deduplication] 중복 체크 후 추가
+          setTransactionHistory(prevHistory => {
+            if (isDuplicateTransaction(transaction, prevHistory)) {
+              console.warn('[Transaction] 중복 거래 내역 감지, 추가하지 않음:', transaction.id);
+              return prevHistory;
+            }
+            return [...prevHistory, transaction];
+          });
         }
       }
       
@@ -1293,7 +1600,7 @@ ${facilityInfo}`;
         // [Money-Validation] 자금 무결성 검증 로직 추가
         // 거래 내역에 기록
         const transaction: Transaction = {
-          id: `facility-upgrade-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          id: generateTransactionId('facility-upgrade'),
           date: gameState.date || new Date().toISOString(),
           amount: -result.cost, // 차감이므로 음수
           category: 'FACILITY_UPGRADE',
@@ -1301,7 +1608,14 @@ ${facilityInfo}`;
           balanceAfter: gameState.budget !== null ? gameState.budget - result.cost : 0,
         };
         
-        setTransactionHistory(prevHistory => [...prevHistory, transaction]);
+        // [Fix - Deduplication] 중복 체크 후 추가
+        setTransactionHistory(prevHistory => {
+          if (isDuplicateTransaction(transaction, prevHistory)) {
+            console.warn('[Transaction] 중복 거래 내역 감지, 추가하지 않음:', transaction.id);
+            return prevHistory;
+          }
+          return [...prevHistory, transaction];
+        });
         
         // [FIX] 시설 레벨 업데이트
         setFacilities((prev) => ({
@@ -1368,11 +1682,10 @@ ${definition.effect(result.newLevel).description}
   }, [gameState, facilities, newsItems, readNewsCount, selectedTeam, pendingOptions, difficulty, transactionHistory, currentRoster, leagueStandings]);
 
   // [NEW] 파일로 저장 (백업)
-  const handleSaveToFile = useCallback(async () => {
+  const handleSaveToFile = useCallback(() => {
     try {
       const saveData = getSaveData();
       
-      const { FileStorageStrategy } = await import('../services/FileStorageStrategy');
       FileStorageStrategy.exportSaveFile(saveData);
       
       playSound('success');
@@ -1384,9 +1697,8 @@ ${definition.effect(result.newLevel).description}
   }, [getSaveData, playSound]);
 
   // [NEW] 파일에서 불러오기
-  const handleLoadFromFile = useCallback(async () => {
+  const handleLoadFromFile = useCallback(() => {
     try {
-      const { FileStorageStrategy } = await import('../services/FileStorageStrategy');
       const input = FileStorageStrategy.createFileUploadInput(
         (data) => {
           try {
@@ -1487,13 +1799,121 @@ ${definition.effect(result.newLevel).description}
     }
   }, [getSaveData, playSound]);
 
-  // 저장 기능 (기존 호환성 유지)
-  const handleSave = useCallback(() => {
-    handleLocalSave();
-  }, [handleLocalSave]);
+  // 저장/불러오기 모달 열기 (통합 버튼)
+  const handleSaveLoad = useCallback(() => {
+    setIsSaveLoadModalOpen(true);
+    playSound('click');
+  }, [playSound]);
 
-  // 불러오기 기능
-  const handleLoad = useCallback(async () => {
+  // [SaveLoadModal] 데이터 복원 핸들러
+  const handleLoadData = useCallback(async (data: GameSaveData) => {
+    // 중복 호출 방지
+    if (isLoadProcessingRef.current) {
+      console.log('[불러오기] 이미 진행 중입니다.');
+      return;
+    }
+    
+    isLoadProcessingRef.current = true;
+    
+    try {
+      // 필수 데이터 검증
+      if (!data || typeof data !== 'object') {
+        alert('저장 데이터가 올바른 형식이 아닙니다.\n\n올바른 세이브 파일을 선택해주세요.');
+        isLoadProcessingRef.current = false;
+        return;
+      }
+      
+      if (!data.messages || !Array.isArray(data.messages)) {
+        alert('저장 데이터에 메시지 정보가 없습니다.\n\n게임을 불러올 수 없습니다.');
+        isLoadProcessingRef.current = false;
+        return;
+      }
+      
+      if (data.messages.length === 0) {
+        alert('저장 데이터에 게임 진행 정보가 없습니다.\n\n새 게임을 시작해주세요.');
+        isLoadProcessingRef.current = false;
+        return;
+      }
+      
+      if (!data.gameState || typeof data.gameState !== 'object') {
+        alert('저장 데이터에 게임 상태 정보가 없습니다.\n\n게임을 불러올 수 없습니다.');
+        isLoadProcessingRef.current = false;
+        return;
+      }
+
+      // 모델이 준비되지 않았으면 대기
+      if (!modelRef.current) {
+        alert('API 연결을 기다리는 중입니다. 잠시 후 다시 시도해주세요.');
+        isLoadProcessingRef.current = false;
+        return;
+      }
+
+      // 메시지 복원
+      setMessages(data.messages);
+      messagesRef.current = data.messages;
+
+      // 게임 상태 복원
+      if (data.gameState) {
+        const restoredGameState = {
+          ...data.gameState,
+          difficulty: data.gameState.difficulty || difficulty,
+        };
+        setGameState(restoredGameState);
+      }
+      if (data.facilities) {
+        setFacilities(data.facilities);
+      }
+      if (data.newsItems) {
+        setNewsItems(data.newsItems);
+      }
+      if (data.readNewsCount !== undefined) {
+        setReadNewsCount(data.readNewsCount);
+      }
+      if (data.pendingOptions) {
+        setPendingOptions(data.pendingOptions);
+      }
+      // [Money-Validation] 자금 무결성 검증 로직 추가 - 거래 내역 복원
+      if (data.transactionHistory && Array.isArray(data.transactionHistory)) {
+        setTransactionHistory(data.transactionHistory);
+      }
+      // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
+      if (data.currentRoster && Array.isArray(data.currentRoster)) {
+        setCurrentRoster(data.currentRoster);
+      }
+      // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
+      if (data.leagueStandings && typeof data.leagueStandings === 'object') {
+        setLeagueStandings(data.leagueStandings);
+      }
+
+      // **핵심**: 모델에 메시지 히스토리 복원하여 API 연결 유지
+      if (data.messages.length > 0) {
+        const history = data.messages.map((msg: Message) => ({
+          role: msg.isUser ? 'user' : 'model',
+          parts: [{ text: msg.text }],
+        }));
+
+        // 첫 번째 메시지가 model이면 제거 (API 규칙 준수)
+        const safeHistory = history[0]?.role === 'model'
+          ? history.slice(1)
+          : history;
+
+        chatInstanceRef.current = modelRef.current.startChat({
+          history: safeHistory,
+        });
+      }
+
+      playSound('success');
+      isLoadProcessingRef.current = false;
+    } catch (error) {
+      console.error('[ChatInterface] 데이터 복원 오류:', error);
+      const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+      alert(`게임 데이터 복원에 실패했습니다.\n\n오류: ${errorMessage}`);
+      isLoadProcessingRef.current = false;
+    }
+  }, [difficulty, playSound]);
+
+  // [DEPRECATED] 기존 불러오기 기능 (하위 호환성 유지)
+  const handleLoadOld = useCallback(async () => {
     // 중복 호출 방지 (모바일 터치 이벤트 중복 방지)
     if (isLoadProcessingRef.current) {
       console.log('[불러오기] 이미 진행 중입니다.');
@@ -1510,7 +1930,6 @@ ${definition.effect(result.newLevel).description}
     
     if (useFileUpload) {
       try {
-        const { FileStorageStrategy } = await import('../services/FileStorageStrategy');
         const input = FileStorageStrategy.createFileUploadInput(
           (data) => {
             try {
@@ -1801,7 +2220,7 @@ ${definition.effect(result.newLevel).description}
   return (
     <div className="flex flex-col h-full w-full bg-[#Fdfbf7] overflow-hidden">
       {/* 헤더 - 상태바 */}
-      <div className="flex-none pt-[env(safe-area-inset-top)]">
+      <div className="flex-none">
         <GameHeader 
           teamName={
             selectedTeam.id === 'expansion' 
@@ -1814,61 +2233,20 @@ ${definition.effect(result.newLevel).description}
           difficulty={difficulty}
           salaryCapUsage={gameState.salaryCapUsage}
           onApiKeyClick={onResetApiKey}
-          onSaveClick={handleSave}
-          onLoadClick={handleLoad}
+          onSaveLoadClick={handleSaveLoad}
+          onStandingsClick={() => {
+            setIsStandingsOpen(true);
+            playSound('click');
+          }}
+          onTransactionClick={() => {
+            setIsTransactionOpen(true);
+            playSound('click');
+          }}
+          onResultClick={() => {
+            setIsResultOpen(true);
+            playSound('click');
+          }}
         />
-      </div>
-
-      {/* 경영 대시보드 툴바 */}
-      <div className="flex-none bg-gradient-to-r from-gray-50 to-white border-b-2 border-baseball-green/20 shadow-sm z-30">
-        <div className="max-w-5xl mx-auto px-3 sm:px-4 md:px-6 py-3 sm:py-3.5">
-          <div className="flex items-center justify-center gap-2 sm:gap-3 md:gap-4">
-            {/* 순위표 버튼 */}
-            <motion.button
-              whileHover={{ scale: 1.05, y: -2 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                setIsStandingsOpen(true);
-                playSound('click');
-              }}
-              className="flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-2 sm:py-2.5 bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 hover:from-baseball-green/20 hover:to-baseball-green/10 active:from-baseball-green/30 active:to-baseball-green/15 border-2 border-baseball-green/30 rounded-lg transition-all shadow-sm hover:shadow-md touch-manipulation min-h-[44px] min-w-[44px] flex-shrink-0"
-              title="리그 순위표"
-            >
-              <Trophy className="w-5 h-5 sm:w-5 sm:h-5 text-baseball-green flex-shrink-0" />
-              <span className="text-xs sm:text-sm font-semibold text-baseball-green hidden sm:inline whitespace-nowrap">순위표</span>
-            </motion.button>
-
-            {/* 장부 버튼 */}
-            <motion.button
-              whileHover={{ scale: 1.05, y: -2 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                setIsTransactionOpen(true);
-                playSound('click');
-              }}
-              className="flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-2 sm:py-2.5 bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 hover:from-baseball-green/20 hover:to-baseball-green/10 active:from-baseball-green/30 active:to-baseball-green/15 border-2 border-baseball-green/30 rounded-lg transition-all shadow-sm hover:shadow-md touch-manipulation min-h-[44px] min-w-[44px] flex-shrink-0"
-              title="거래 내역"
-            >
-              <Receipt className="w-5 h-5 sm:w-5 sm:h-5 text-baseball-green flex-shrink-0" />
-              <span className="text-xs sm:text-sm font-semibold text-baseball-green hidden sm:inline whitespace-nowrap">장부</span>
-            </motion.button>
-
-            {/* 최근 경기 버튼 */}
-            <motion.button
-              whileHover={{ scale: 1.05, y: -2 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                setIsResultOpen(true);
-                playSound('click');
-              }}
-              className="flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-2 sm:py-2.5 bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 hover:from-baseball-green/20 hover:to-baseball-green/10 active:from-baseball-green/30 active:to-baseball-green/15 border-2 border-baseball-green/30 rounded-lg transition-all shadow-sm hover:shadow-md touch-manipulation min-h-[44px] min-w-[44px] flex-shrink-0"
-              title="최근 경기 결과"
-            >
-              <MonitorPlay className="w-5 h-5 sm:w-5 sm:h-5 text-baseball-green flex-shrink-0" />
-              <span className="text-xs sm:text-sm font-semibold text-baseball-green hidden sm:inline whitespace-nowrap">경기 결과</span>
-            </motion.button>
-          </div>
-        </div>
       </div>
 
       {/* 메인 - 채팅 영역 */}
@@ -1879,8 +2257,72 @@ ${definition.effect(result.newLevel).description}
               key={idx}
               message={msg.text}
               isUser={msg.isUser}
+              isStreaming={msg.isStreaming}
             />
           ))}
+          {/* 로딩 스켈레톤 - 내용이 나오기 전까지 표시 */}
+          {isLoading && !hasStartedStreaming && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="mb-4"
+            >
+              <div className="bg-gradient-to-br from-white to-gray-50/50 border-2 border-baseball-green/20 rounded-xl shadow-lg overflow-hidden">
+                {/* 게임스러운 헤더 스켈레톤 */}
+                <div className="bg-gradient-to-r from-baseball-green/50 to-[#0a3528]/50 border-b-2 border-baseball-gold/30 px-4 py-3 flex items-center gap-2">
+                  <motion.div
+                    animate={{ opacity: [0.3, 0.7, 0.3] }}
+                    transition={{ repeat: Infinity, duration: 1.5 }}
+                    className="w-5 h-5 bg-white/30 rounded"
+                  ></motion.div>
+                  <motion.div
+                    animate={{ opacity: [0.3, 0.7, 0.3] }}
+                    transition={{ repeat: Infinity, duration: 1.5, delay: 0.2 }}
+                    className="h-4 w-32 bg-white/30 rounded"
+                  ></motion.div>
+                  <motion.div
+                    animate={{ opacity: [0.3, 0.7, 0.3] }}
+                    transition={{ repeat: Infinity, duration: 1.5, delay: 0.4 }}
+                    className="h-4 w-16 bg-white/30 rounded ml-auto"
+                  ></motion.div>
+                </div>
+                {/* 본문 스켈레톤 */}
+                <div className="px-4 py-4 space-y-3">
+                  <motion.div
+                    animate={{ opacity: [0.3, 0.6, 0.3] }}
+                    transition={{ repeat: Infinity, duration: 1.5 }}
+                    className="h-4 bg-gray-200/50 rounded w-full"
+                  ></motion.div>
+                  <motion.div
+                    animate={{ opacity: [0.3, 0.6, 0.3] }}
+                    transition={{ repeat: Infinity, duration: 1.5, delay: 0.1 }}
+                    className="h-4 bg-gray-200/50 rounded w-5/6"
+                  ></motion.div>
+                  <motion.div
+                    animate={{ opacity: [0.3, 0.6, 0.3] }}
+                    transition={{ repeat: Infinity, duration: 1.5, delay: 0.2 }}
+                    className="h-4 bg-gray-200/50 rounded w-4/5"
+                  ></motion.div>
+                  <motion.div
+                    animate={{ opacity: [0.3, 0.6, 0.3] }}
+                    transition={{ repeat: Infinity, duration: 1.5, delay: 0.3 }}
+                    className="h-4 bg-gray-200/50 rounded w-full"
+                  ></motion.div>
+                  <motion.div
+                    animate={{ opacity: [0.3, 0.6, 0.3] }}
+                    transition={{ repeat: Infinity, duration: 1.5, delay: 0.4 }}
+                    className="h-4 bg-gray-200/50 rounded w-3/4"
+                  ></motion.div>
+                  <motion.div
+                    animate={{ opacity: [0.3, 0.5, 0.3] }}
+                    transition={{ repeat: Infinity, duration: 1.5, delay: 0.5 }}
+                    className="mt-4 h-32 bg-gray-200/30 rounded"
+                  ></motion.div>
+                </div>
+              </div>
+            </motion.div>
+          )}
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -1955,11 +2397,12 @@ ${definition.effect(result.newLevel).description}
         </form>
       </div>
 
-      {/* 로딩 오버레이 (자동 진행 바 포함) */}
-      <LoadingOverlay 
+      {/* [UX Optimization] 로딩 오버레이 제거 - 스트리밍 텍스트가 자연스럽게 나타나도록 */}
+      {/* isLoading은 입력 필드 비활성화에만 사용 */}
+      {/* <LoadingOverlay 
         isLoading={isLoading}
         statusText={loadingStatusText}
-      />
+      /> */}
 
       {/* 선택지 모달 */}
       <OptionsModal
@@ -2036,6 +2479,13 @@ ${definition.effect(result.newLevel).description}
         isOpen={isResultOpen}
         onClose={() => setIsResultOpen(false)}
         lastGameResult={lastGameResult}
+      />
+
+      <SaveLoadModal
+        isOpen={isSaveLoadModalOpen}
+        onClose={() => setIsSaveLoadModalOpen(false)}
+        onLoad={handleLoadData}
+        getSaveData={getSaveData}
       />
 
     </div>

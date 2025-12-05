@@ -9,9 +9,6 @@ import ChatInterface from './components/ChatInterface';
 import { ToastProvider } from './context/ToastContext';
 import { Team } from './constants/TeamData';
 import { Difficulty } from './constants/GameConfig';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import { getStorageService } from './services/StorageService';
-import { loadGameData } from './lib/dataLoader';
 import { FileStorageStrategy } from './services/FileStorageStrategy';
 import { GameSaveData } from './services/StorageService';
 import LoadGameModal from './components/LoadGameModal';
@@ -20,9 +17,8 @@ const SAVE_KEY = 'baseball_game_save';
 
 type ScreenView = 'start' | 'difficulty_select' | 'team_select' | 'expansion_form' | 'game';
 
-// [NEW] 내부 App 컴포넌트 (AuthContext 사용)
+// [NEW] 내부 App 컴포넌트
 function AppContent() {
-  const { isLoggedIn, user } = useAuth(); // [NEW] AuthContext 사용
   const [apiKey, setApiKey] = useState<string>('');
   const [showApiKeyModal, setShowApiKeyModal] = useState(true);
   const [screenView, setScreenView] = useState<ScreenView>('start');
@@ -85,112 +81,59 @@ function AppContent() {
     setScreenView('team_select');
   };
 
-  // [NEW] 로컬 저장소에서 불러오기
+  // 로컬 저장소에서 불러오기
   const handleLoadFromLocal = async () => {
     try {
-      const storageService = getStorageService(user?.id);
+      const savedData = localStorage.getItem(SAVE_KEY);
+      if (!savedData) {
+        alert('저장된 게임이 없습니다.\n\n새 게임을 시작해주세요.');
+        setIsLoadModalOpen(false);
+        return;
+      }
       
-      // [NEW] 데이터 로드 우선순위 로직 적용
-      const loadResult = await loadGameData(storageService, SAVE_KEY, isLoggedIn);
-      
-      // [NEW] 데이터가 없는 경우 처리
-      if (!loadResult.data) {
-        // [NEW] Fail-Safe: 기존 로컬 스토리지 방식으로 폴백
-        const savedData = localStorage.getItem(SAVE_KEY);
-        if (!savedData) {
-          alert('저장된 게임이 없습니다.\n\n새 게임을 시작해주세요.');
+      try {
+        const parsed = JSON.parse(savedData);
+        
+        // 필수 데이터 검증
+        if (!parsed || typeof parsed !== 'object') {
+          alert('저장 데이터가 손상되었습니다.\n\n올바른 형식의 저장 파일이 아닙니다.');
           setIsLoadModalOpen(false);
           return;
         }
         
-        try {
-          const parsed = JSON.parse(savedData);
-          
-          // [NEW] 필수 데이터 검증
-          if (!parsed || typeof parsed !== 'object') {
-            alert('저장 데이터가 손상되었습니다.\n\n올바른 형식의 저장 파일이 아닙니다.');
-            setIsLoadModalOpen(false);
-            return;
-          }
-          
-          if (!parsed.selectedTeam) {
-            alert('저장 데이터에 팀 정보가 없습니다.\n\n게임을 불러올 수 없습니다.');
-            setIsLoadModalOpen(false);
-            return;
-          }
-          
-          // [NEW] 메시지 데이터 검증 (게임 진행 여부 확인)
-          if (!parsed.messages || !Array.isArray(parsed.messages) || parsed.messages.length === 0) {
-            alert('저장 데이터에 게임 진행 정보가 없습니다.\n\n새 게임을 시작해주세요.');
-            setIsLoadModalOpen(false);
-            return;
-          }
-          
-          setSelectedTeam(parsed.selectedTeam);
-          if (parsed.difficulty) {
-            if (parsed.difficulty === 'HARD') {
-              setDifficulty('HELL');
-            } else {
-              setDifficulty(parsed.difficulty);
-            }
+        if (!parsed.selectedTeam) {
+          alert('저장 데이터에 팀 정보가 없습니다.\n\n게임을 불러올 수 없습니다.');
+          setIsLoadModalOpen(false);
+          return;
+        }
+        
+        // 메시지 데이터 검증 (게임 진행 여부 확인)
+        if (!parsed.messages || !Array.isArray(parsed.messages) || parsed.messages.length === 0) {
+          alert('저장 데이터에 게임 진행 정보가 없습니다.\n\n새 게임을 시작해주세요.');
+          setIsLoadModalOpen(false);
+          return;
+        }
+        
+        setSelectedTeam(parsed.selectedTeam);
+        if (parsed.difficulty) {
+          if (parsed.difficulty === 'HARD') {
+            setDifficulty('HELL');
           } else {
-            setDifficulty('NORMAL');
+            setDifficulty(parsed.difficulty as Difficulty);
           }
-          setShouldLoadGame(true);
-          setScreenView('game');
-          setIsLoadModalOpen(false);
-          return;
-        } catch (parseError) {
-          console.error('[App] 폴백 파싱 오류:', parseError);
-          alert('저장 데이터를 읽을 수 없습니다.\n\n파일이 손상되었거나 올바른 형식이 아닙니다.');
-          setIsLoadModalOpen(false);
-          return;
-        }
-      }
-      
-      const parsed = loadResult.data;
-      
-      // [NEW] 필수 데이터 검증
-      if (!parsed || typeof parsed !== 'object') {
-        alert('저장 데이터가 손상되었습니다.\n\n올바른 형식의 저장 파일이 아닙니다.');
-        setIsLoadModalOpen(false);
-        return;
-      }
-      
-      // [NEW] 팀 정보 검증
-      if (!parsed.selectedTeam) {
-        alert('저장 데이터에 팀 정보가 없습니다.\n\n게임을 불러올 수 없습니다.');
-        setIsLoadModalOpen(false);
-        return;
-      }
-      
-      // [NEW] 메시지 데이터 검증 (게임 진행 여부 확인)
-      if (!parsed.messages || !Array.isArray(parsed.messages) || parsed.messages.length === 0) {
-        alert('저장 데이터에 게임 진행 정보가 없습니다.\n\n새 게임을 시작해주세요.');
-        setIsLoadModalOpen(false);
-        return;
-      }
-      
-      setSelectedTeam(parsed.selectedTeam);
-      
-      // 난이도 복원 (저장된 데이터에 있으면 사용, 없으면 기본값 NORMAL)
-      if (parsed.difficulty) {
-        // 기존 HARD는 HELL로 매핑 (호환성)
-        if (parsed.difficulty === 'HARD') {
-          setDifficulty('HELL');
         } else {
-          setDifficulty(parsed.difficulty as Difficulty);
+          setDifficulty('NORMAL');
         }
-      } else {
-        setDifficulty('NORMAL');
+        setShouldLoadGame(true);
+        setScreenView('game');
+        setIsLoadModalOpen(false);
+      } catch (parseError) {
+        console.error('[App] 파싱 오류:', parseError);
+        alert('저장 데이터를 읽을 수 없습니다.\n\n파일이 손상되었거나 올바른 형식이 아닙니다.');
+        setIsLoadModalOpen(false);
       }
-      
-      setShouldLoadGame(true);
-      setScreenView('game');
-      setIsLoadModalOpen(false);
     } catch (error) {
       console.error('[App] 불러오기 오류:', error);
-      
       const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
       alert(`게임 불러오기에 실패했습니다.\n\n오류: ${errorMessage}\n\n새 게임을 시작해주세요.`);
       setIsLoadModalOpen(false);
@@ -244,14 +187,13 @@ function AppContent() {
               setDifficulty('NORMAL');
             }
             
-            // [NEW] 파일에서 불러온 데이터를 로컬 스토리지에도 저장 (동기화)
+            // 파일에서 불러온 데이터를 로컬 스토리지에도 저장
             try {
-              const storageService = getStorageService(user?.id);
-              storageService.save(SAVE_KEY, data);
+              localStorage.setItem(SAVE_KEY, JSON.stringify(data));
             } catch (syncError) {
-              console.error('로컬 저장 동기화 오류:', syncError);
+              console.error('로컬 저장 오류:', syncError);
               // 로컬 저장 실패해도 게임은 진행 가능 (경고만 표시)
-              console.warn('로컬 저장소 동기화에 실패했지만 게임은 계속 진행됩니다.');
+              console.warn('로컬 저장소 저장에 실패했지만 게임은 계속 진행됩니다.');
             }
             
             setShouldLoadGame(true);
@@ -287,22 +229,15 @@ function AppContent() {
     setIsLoadModalOpen(true);
   };
 
-  const handleStartNewGame = async () => {
-    // [NEW] 하이브리드 저장 시스템 사용
-    try {
-      const storageService = getStorageService(user?.id);
-      await storageService.delete(SAVE_KEY);
-    } catch (error) {
-      console.error('[App] 삭제 오류:', error);
-      // [NEW] Fail-Safe: 기존 로컬 스토리지 방식으로 폴백
-      localStorage.removeItem(SAVE_KEY);
-    }
+  const handleStartNewGame = () => {
+    // 저장된 게임 데이터 삭제
+    localStorage.removeItem(SAVE_KEY);
     
     setShouldLoadGame(false);
     setSelectedTeam(null);
     setDifficulty(null);
     
-    // 난이도 선택 화면으로 이동 (API 호출 없이 즉시)
+    // 난이도 선택 화면으로 이동
     setScreenView('difficulty_select');
   };
 
@@ -312,7 +247,7 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F7FA] px-0 sm:px-2 overflow-x-hidden">
+    <div className="h-full w-full bg-[#F5F7FA] overflow-hidden flex flex-col">
       <AnimatePresence mode="wait">
         {showApiKeyModal ? (
           <ApiKeyModal key="api-key-modal" onApiKeySet={handleApiKeySet} />
@@ -362,14 +297,12 @@ function AppContent() {
   );
 }
 
-// [NEW] 외부 App 컴포넌트 (AuthProvider와 ToastProvider로 감싸기)
+// 외부 App 컴포넌트 (ToastProvider로 감싸기)
 function App() {
   return (
-    <AuthProvider>
-      <ToastProvider>
-        <AppContent />
-      </ToastProvider>
-    </AuthProvider>
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 }
 

@@ -4,7 +4,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { motion } from 'framer-motion';
 import { parseAIResponse } from '../lib/utils';
-import { PlayerCardData } from './PlayerCard';
 
 interface MessageBubbleProps {
   message: string;

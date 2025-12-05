@@ -62,6 +62,115 @@ export interface Transaction {
   balanceAfter: number; // 거래 후 잔액 (원 단위)
 }
 
+// [Fix - Deduplication] 고유 ID 생성 카운터 (타임스탬프 충돌 방지)
+let transactionIdCounter = 0;
+
+/**
+ * [Fix - Deduplication] 고유 거래 내역 ID 생성 함수
+ * Date.now()와 랜덤 문자열, 카운터를 조합하여 고유 ID를 생성합니다.
+ * @param prefix ID 접두사 (예: 'ai-report', 'finance-update')
+ * @returns 고유 ID 문자열
+ */
+export function generateTransactionId(prefix: string): string {
+  transactionIdCounter = (transactionIdCounter + 1) % 1000000; // 100만으로 나머지 연산하여 오버플로우 방지
+  const timestamp = Date.now();
+  const performanceTime = typeof performance !== 'undefined' ? performance.now() : 0;
+  const random = Math.random().toString(36).substr(2, 9);
+  return `${prefix}-${timestamp}-${performanceTime.toFixed(3)}-${transactionIdCounter}-${random}`;
+}
+
+/**
+ * [Fix - Deduplication] 거래 내역 중복 체크 함수
+ * 동일한 거래 내역이 이미 존재하는지 확인합니다.
+ * @param transaction 확인할 거래 내역
+ * @param existingTransactions 기존 거래 내역 배열
+ * @returns 중복 여부 (true: 중복, false: 고유)
+ */
+export function isDuplicateTransaction(
+  transaction: Transaction,
+  existingTransactions: Transaction[]
+): boolean {
+  if (!transaction || !existingTransactions || existingTransactions.length === 0) {
+    return false;
+  }
+
+  // 1. ID로 중복 체크 (가장 정확)
+  if (transaction.id) {
+    const duplicateById = existingTransactions.some(t => t.id === transaction.id);
+    if (duplicateById) {
+      console.warn(`[Transaction Deduplication] ID 중복 감지: ${transaction.id}`);
+      return true;
+    }
+  }
+
+  // 2. 내용 기반 중복 체크 (ID가 없거나 충돌하는 경우)
+  // date, amount, description, balanceAfter가 모두 같으면 중복으로 간주
+  const duplicateByContent = existingTransactions.some(t => {
+    const dateMatch = t.date === transaction.date;
+    const amountMatch = Math.abs(t.amount - transaction.amount) < 1; // 1원 이내 차이는 동일 금액으로 간주
+    const descriptionMatch = t.description === transaction.description;
+    const balanceMatch = Math.abs(t.balanceAfter - transaction.balanceAfter) < 1; // 1원 이내 차이는 동일 잔액으로 간주
+    const categoryMatch = t.category === transaction.category;
+
+    if (dateMatch && amountMatch && descriptionMatch && balanceMatch && categoryMatch) {
+      console.warn(
+        `[Transaction Deduplication] 내용 중복 감지:\n` +
+        `  날짜: ${transaction.date}\n` +
+        `  금액: ${transaction.amount}\n` +
+        `  설명: ${transaction.description}\n` +
+        `  잔액: ${transaction.balanceAfter}`
+      );
+      return true;
+    }
+    return false;
+  });
+
+  return duplicateByContent;
+}
+
+/**
+ * [Fix - Deduplication] 거래 내역 배열에서 중복 제거
+ * @param transactions 거래 내역 배열
+ * @returns 중복이 제거된 거래 내역 배열
+ */
+export function deduplicateTransactions(transactions: Transaction[]): Transaction[] {
+  if (!transactions || transactions.length === 0) {
+    return [];
+  }
+
+  const seen = new Map<string, Transaction>();
+  const uniqueTransactions: Transaction[] = [];
+
+  for (const transaction of transactions) {
+    // ID 기반 중복 체크
+    if (transaction.id && seen.has(transaction.id)) {
+      console.warn(`[Transaction Deduplication] ID 중복 제거: ${transaction.id}`);
+      continue;
+    }
+
+    // 내용 기반 중복 체크 (ID가 없는 경우)
+    const contentKey = `${transaction.date}|${transaction.amount}|${transaction.description}|${transaction.balanceAfter}|${transaction.category}`;
+    if (seen.has(contentKey)) {
+      console.warn(`[Transaction Deduplication] 내용 중복 제거: ${contentKey}`);
+      continue;
+    }
+
+    // 고유한 거래 내역으로 확인
+    if (transaction.id) {
+      seen.set(transaction.id, transaction);
+    }
+    seen.set(contentKey, transaction);
+    uniqueTransactions.push(transaction);
+  }
+
+  const removedCount = transactions.length - uniqueTransactions.length;
+  if (removedCount > 0) {
+    console.log(`[Transaction Deduplication] ${removedCount}개의 중복 거래 내역이 제거되었습니다.`);
+  }
+
+  return uniqueTransactions;
+}
+
 /**
  * [Money-Validation] 자금 무결성 검증 함수
  * AI 응답에서 파싱된 자금과 클라이언트 누적 자금을 비교하여 오차를 검증합니다.

@@ -45,6 +45,14 @@ export default function LoadingOverlay({ isLoading, statusText }: LoadingOverlay
       // 로딩 시작
       setProgress(0);
       setIsVisible(true);
+      
+      // [CRITICAL FIX] 로딩 중 body 스크롤 잠금 (필요한 경우에만)
+      // 주의: index.css에서 이미 overflow: hidden이 설정되어 있으므로
+      // 추가로 body 스타일을 조작하지 않음
+      // 만약 다른 곳에서 body overflow를 변경했다면 복구를 보장하기 위해
+      // 원래 overflow 값을 저장해두고 복구하는 것이 안전함
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
 
       // Trickle 알고리즘 구현
       let currentProgress = 0;
@@ -102,7 +110,7 @@ export default function LoadingOverlay({ isLoading, statusText }: LoadingOverlay
       }, 500);
     }
 
-    // Cleanup
+    // Cleanup - [CRITICAL FIX] body overflow 복구
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -111,6 +119,16 @@ export default function LoadingOverlay({ isLoading, statusText }: LoadingOverlay
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
         timeoutRef.current = null;
+      }
+      
+      // [CRITICAL FIX] 로딩이 끝나면 body overflow 복구
+      // index.css에서 overflow: hidden이 설정되어 있지만,
+      // 다른 곳에서 변경했을 수 있으므로 명시적으로 복구
+      // 원래 값이 없었으면 빈 문자열로 복구 (CSS 기본값 사용)
+      if (!isLoading) {
+        // 로딩이 완료된 경우에만 복구
+        // index.css의 overflow: hidden은 유지하되, 인라인 스타일은 제거
+        document.body.style.overflow = '';
       }
     };
   }, [isLoading]);

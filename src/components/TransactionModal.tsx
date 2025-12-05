@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, TrendingUp, TrendingDown } from 'lucide-react';
-import { Transaction } from '../lib/utils';
+import { Transaction, deduplicateTransactions } from '../lib/utils';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -55,8 +55,9 @@ export default function TransactionModal({ isOpen, onClose, transactions }: Tran
     return labels[category] || category;
   };
 
-  // 최신순 정렬
-  const sortedTransactions = [...transactions].sort((a, b) => {
+  // [Fix - Deduplication] 중복 제거 후 최신순 정렬
+  const deduplicatedTransactions = deduplicateTransactions(transactions);
+  const sortedTransactions = [...deduplicatedTransactions].sort((a, b) => {
     return new Date(b.date).getTime() - new Date(a.date).getTime();
   });
 
