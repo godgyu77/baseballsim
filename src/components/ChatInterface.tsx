@@ -14,11 +14,18 @@ import TransactionModal from './TransactionModal';
 import StandingsModal from './StandingsModal';
 import GameResultModal from './GameResultModal';
 import SaveLoadModal from './SaveLoadModal';
+import MonitoringDashboard from './MonitoringDashboard';
 import { useToast } from '../context/ToastContext';
 import { parseAIResponse, extractDate, extractBudget, GamePhase, GUIEvent, RandomEvent, FacilityType, FacilityState, StatusInfo, Transaction, validateBudgetIntegrity, Player, validateRosterIntegrity, extractPlayerNamesFromInitialData, GameResult, TeamRecord, isDuplicateTransaction, deduplicateTransactions, generateTransactionId } from '../lib/utils';
 import { retryRequest } from '../lib/retryUtils';
+import { isQuotaExceededError, getQuotaExceededMessage, getQuotaExceededAlertMessage } from '../lib/errorUtils';
+import { optimizeForTokenUsage } from '../lib/tokenOptimizer';
+import { compressHistory } from '../lib/historySummarizer';
+import { monitoringService, extractTokenUsageFromResponse } from '../lib/monitoring';
 import { debounce } from '../lib/debounce';
+import { SafeStorage, safeSetJSON, safeGetJSON } from '../lib/safeStorage';
 import { filterProtectedPlayers, validateDraftPicks, updatePlayerTeamAffiliation, sortDraftOrder, createDraftPool, DraftPlayer, ProtectedPlayer, TeamRank } from '../lib/draftUtils';
+import { fetchFullRosterSequentially } from '../lib/rosterFetcher';
 import { getInitialBudget } from '../constants/GameConfig';
 import { Team } from '../constants/TeamData';
 import { KBO_INITIAL_DATA } from '../constants/prompts';
@@ -97,6 +104,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
   const [isStandingsOpen, setIsStandingsOpen] = useState(false);
   const [isSaveLoadModalOpen, setIsSaveLoadModalOpen] = useState(false);
   const [isResultOpen, setIsResultOpen] = useState(false);
+  const [isMonitoringOpen, setIsMonitoringOpen] = useState(false);
   const { showToast } = useToast(); // Toast 알림 훅
   const isLoadProcessingRef = useRef(false); // 불러오기 중복 방지 플래그
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -109,6 +117,17 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
 
   // handleSend 함수를 최상단으로 이동 (TDZ 문제 해결)
   const handleSend = useCallback(async (messageText: string, options?: { hideFromUI?: boolean; displayMessage?: string }) => {
+    // 🚀 [CRITICAL DEBUG] API Request Start - 데이터 전송 파이프라인 검증
+    console.log('🚀 [API Request Start]');
+    console.log('📋 [State Check] Selected Team:', selectedTeam);
+    console.log('📋 [State Check] Selected Difficulty:', difficulty);
+    console.log('📋 [State Check] Expansion Team Data:', expansionTeamData);
+    console.log('📋 [Props Check] selectedTeam prop:', selectedTeam?.fullName || selectedTeam?.name || 'null');
+    console.log('📋 [Props Check] difficulty prop:', difficulty || 'null');
+    console.log('📋 [Message Check] Actual Prompt Sent (first 500 chars):', messageText.substring(0, 500));
+    console.log('📋 [Message Check] Prompt includes team?', messageText.includes(selectedTeam?.fullName || selectedTeam?.name || ''));
+    console.log('📋 [Message Check] Prompt includes difficulty?', messageText.includes(difficulty || ''));
+    
     // 빈 값 방어 코드 추가
     if (!messageText || !messageText.trim() || isLoadingRef.current) {
       console.warn('[handleSend] 메시지가 비어있거나 이미 로딩 중입니다.');
@@ -125,7 +144,17 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     // 신생 구단인 경우 구단 이름은 expansionTeamData에서 받은 값으로 고정 (절대 변경하지 않음)
     // AI 응답이나 사용자 메시지에서 구단명을 추출해도 업데이트하지 않음
     
+    // [OPTIMIZE] 사용자 입력 길이 제한 (토큰 절약)
+    // [FIX] 초기 데이터가 포함된 경우 최적화 건너뛰기
+    const isInitialData = userMessage.includes('[SYSTEM STATUS: FIXED]') || 
+                          userMessage.includes('KBO_INITIAL_DATA') ||
+                          userMessage.length > 30000;
+    
+    const { optimizedUserInput } = optimizeForTokenUsage([], userMessage, isInitialData);
+    const optimizedMessage = optimizedUserInput;
+    
     // 사용자 메시지를 화면에 추가 (hideFromUI가 false인 경우만)
+    // 화면에는 원본 메시지 표시 (사용자 경험 유지)
     // [4K 최적화] 메시지 개수 제한 (최대 150개 유지)
     if (!hideFromUI) {
       setMessages((prev) => {
@@ -135,8 +164,9 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     }
     
     // messagesRef 업데이트 (API 히스토리 생성을 위해 실제 전송할 메시지 저장)
+    // 최적화된 메시지를 저장하여 다음 API 호출 시 토큰 절약
     // hideFromUI가 true여도 API 히스토리를 위해 messagesRef에는 실제 메시지 저장
-    messagesRef.current = [...messagesRef.current, { text: userMessage, isUser: true }];
+    messagesRef.current = [...messagesRef.current, { text: optimizedMessage, isUser: true }];
     if (messagesRef.current.length > 150) {
       messagesRef.current = messagesRef.current.slice(-150);
     }
@@ -179,22 +209,50 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           : [];
 
         // [CRITICAL] history의 첫 번째 항목이 'model'이면 제거 (API 규칙 위반 방지)
-        const safeHistory = history.length > 0 && history[0].role === 'model'
+        let safeHistory = history.length > 0 && history[0].role === 'model'
           ? history.slice(1) // 첫 번째 model 메시지 제거
           : history;
 
+        // [OPTIMIZE] 토큰 절약을 위한 스마트 압축 적용
+        // [FIX] 초기 데이터가 포함된 경우 최적화 건너뛰기
+        const isInitialData = optimizedMessage.includes('[SYSTEM STATUS: FIXED]') || 
+                              optimizedMessage.includes('KBO_INITIAL_DATA') ||
+                              optimizedMessage.length > 30000;
+        
+        let finalSafeHistory = safeHistory;
+        if (!isInitialData) {
+          // 1. 히스토리 정리 (메타데이터 제거)
+          const { optimizedHistory } = optimizeForTokenUsage(safeHistory, '', false);
+          // 2. 스마트 압축 (오래된 대화 요약 + 최근 대화 유지, 페르소나 보존)
+          finalSafeHistory = compressHistory(optimizedHistory, 15);
+        } else {
+          console.log('[TokenOptimizer] 초기 데이터 프롬프트: 히스토리 최적화 건너뛰기');
+        }
+
         chatInstanceRef.current = modelRef.current.startChat({
-          history: safeHistory, // 안전한 history 사용
+          history: finalSafeHistory, // 최적화된 history 사용
         });
         console.log('[handleSend] 채팅 인스턴스 생성 완료');
+        
+        // [FIX] 모니터링을 위해 safeHistory를 상위 스코프에 저장
+        (chatInstanceRef.current as any)._safeHistory = finalSafeHistory;
       }
 
-      console.log('[handleSend] API 호출 시작...', { messageLength: userMessage.length });
+      // [OPTIMIZE] 사용자 입력은 이미 위에서 최적화되었으므로 그대로 사용
+      // messagesRef에 저장된 최적화된 메시지 사용
+      const finalUserMessage = optimizedMessage;
+      
+      console.log('[handleSend] API 호출 시작...', { 
+        originalLength: userMessage.length,
+        optimizedLength: finalUserMessage.length,
+        historyTurns: chatInstanceRef.current ? 'optimized' : 'none',
+        tokenOptimized: userMessage.length !== finalUserMessage.length
+      });
       
       // [Auto-Retry] API 호출에 재시도 로직 적용
       const result = await retryRequest(
         async () => {
-          return await chatInstanceRef.current.sendMessageStream(userMessage);
+          return await chatInstanceRef.current.sendMessageStream(finalUserMessage);
         },
         {
           maxRetries: 3,
@@ -282,6 +340,34 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           } catch (chunkError) {
             console.warn('Chunk 처리 오류:', chunkError);
           }
+        }
+
+        // [MONITORING] 토큰 사용량 추적 (스트리밍 완료 후)
+        try {
+          const response = await result.response;
+          const usageMetadata = response.usageMetadata;
+          if (usageMetadata) {
+            const inputTokens = usageMetadata.promptTokenCount || 0;
+            const outputTokens = usageMetadata.candidatesTokenCount || 0;
+            
+            // [FIX] safeHistory 변수 참조 수정
+            const currentHistory = (chatInstanceRef.current as any)?._safeHistory || [];
+            const originalHistoryLength = currentHistory.length;
+            const compressedHistoryLength = currentHistory.length; // 압축 후 길이
+            
+            monitoringService.recordTokenUsage(
+              inputTokens,
+              outputTokens,
+              originalHistoryLength,
+              compressedHistoryLength
+            );
+            
+            // [FIX] 토큰 사용량 로그 출력
+            console.log(`💰 [Estimated Tokens] Input=${inputTokens}, Output=${outputTokens}`);
+          }
+        } catch (monitoringError) {
+          // 모니터링 오류는 무시 (게임 진행에 영향 없음)
+          console.warn('[Monitoring] 토큰 사용량 추적 실패:', monitoringError);
         }
 
         // [Performance Optimization] 스트리밍 루프 종료 후 마지막 업데이트 보장
@@ -474,19 +560,36 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
             );
             
             if (!validation.isValid) {
-              // 검증 실패: 경고 로그 출력 및 기존 로스터 유지 (Fail-Safe)
-              console.error('[Roster-Validation] AI 데이터 오류 감지: 로스터 업데이트를 건너뜁니다.');
-              console.error('[Roster-Validation] 검증 실패 사유:');
-              validation.errors.forEach((error, index) => {
-                console.error(`  ${index + 1}. ${error}`);
-              });
-              if (validation.warnings.length > 0) {
-                console.warn('[Roster-Validation] 경고 사항:');
-                validation.warnings.forEach((warning, index) => {
-                  console.warn(`  ${index + 1}. ${warning}`);
+              // [FIX] 로스터 데이터 잘림 감지 및 처리
+              const isTruncated = validation.isTruncated === true;
+              
+              if (isTruncated) {
+                // 로스터 데이터가 잘린 경우: 심각한 오류로 처리
+                console.error('⚠️ [Roster Truncated!] 로스터 데이터가 잘렸습니다. 로스터 업데이트를 건너뜁니다.');
+                console.error('[Roster-Validation] 잘림 감지 사유:');
+                validation.errors.forEach((error, index) => {
+                  console.error(`  ${index + 1}. ${error}`);
                 });
+                
+                // [TODO] 향후 재요청 로직 구현 가능
+                // 예: handleSend("로스터 데이터가 잘렸습니다. 타자진 데이터만 다시 생성해주세요.", { hideFromUI: true });
+                
+                // 기존 로스터 상태 유지 (업데이트 방지)
+              } else {
+                // 다른 검증 실패: 경고 로그 출력 및 기존 로스터 유지 (Fail-Safe)
+                console.error('[Roster-Validation] AI 데이터 오류 감지: 로스터 업데이트를 건너뜁니다.');
+                console.error('[Roster-Validation] 검증 실패 사유:');
+                validation.errors.forEach((error, index) => {
+                  console.error(`  ${index + 1}. ${error}`);
+                });
+                if (validation.warnings.length > 0) {
+                  console.warn('[Roster-Validation] 경고 사항:');
+                  validation.warnings.forEach((warning, index) => {
+                    console.warn(`  ${index + 1}. ${warning}`);
+                  });
+                }
+                // 기존 로스터 상태 유지 (업데이트 방지)
               }
-              // 기존 로스터 상태 유지 (업데이트 방지)
             } else {
               // 검증 성공: 로스터 업데이트
               if (validation.warnings.length > 0) {
@@ -847,13 +950,27 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       }
     } catch (error) {
       console.error('Error:', error);
+      
+      // [UPDATE] 429 Quota Exceeded 에러 핸들링 추가
       const errorMessage = error instanceof Error ? error.message : String(error) || '알 수 없는 오류';
+      const isQuotaExceeded = isQuotaExceededError(error);
+      
+      let displayMessage: string;
+      
+      if (isQuotaExceeded) {
+        // 429 Quota Exceeded 에러: 사용자 친화적인 안내 메시지
+        displayMessage = getQuotaExceededMessage();
+      } else {
+        // 기타 에러: 기존 메시지 유지
+        displayMessage = `오류가 발생했습니다: ${errorMessage}\n\nAPI 키와 인터넷 연결을 확인해주세요.`;
+      }
+      
       // [4K 최적화] 메시지 개수 제한 (최대 150개 유지)
       setMessages((prev) => {
         const newMessages = [
           ...prev,
           {
-            text: `오류가 발생했습니다: ${errorMessage}\n\nAPI 키와 인터넷 연결을 확인해주세요.`,
+            text: displayMessage,
             isUser: false,
           },
         ];
@@ -867,7 +984,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       setIsLoading(false);
       setHasStartedStreaming(false); // 로딩 완료 시 리셋
     }
-  }, [playSound]);
+  }, [playSound, selectedTeam, difficulty, expansionTeamData]); // [FIX] Stale Closure 방지: selectedTeam, difficulty, expansionTeamData를 의존성 배열에 추가
 
   // handleSend ref 업데이트 (의존성 배열에서 제거하기 위해)
   useEffect(() => {
@@ -895,7 +1012,8 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
         
         // 불러오기 요청이 있으면 게임 상태 복원
         if (shouldLoadGame) {
-          const savedData = localStorage.getItem(SAVE_KEY);
+          // [FIX] SafeStorage를 사용하여 스토리지 접근 실패 시 메모리 Fallback 제공
+          const savedData = SafeStorage.getItem(SAVE_KEY);
           if (savedData) {
             try {
               const parsed = JSON.parse(savedData);
@@ -1050,17 +1168,39 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     pendingOptionsRef.current = pendingOptions;
   }, [pendingOptions]);
 
-  // 게임 초기화 플래그 (중복 호출 방지)
+  // [FIX] 게임 초기화 플래그 (중복 호출 방지 - React StrictMode 대응)
+  // 컴포넌트 생명주기 동안 유지되는 플래그로 StrictMode의 이중 실행 방지
   const isInitializingRef = useRef(false);
+  const hasInitializedRef = useRef(false); // [NEW] 초기화 완료 여부 추적
 
   // handleSend가 정의된 후에 초기화 로직 실행
   useEffect(() => {
-    const savedData = localStorage.getItem(SAVE_KEY);
+    // [FIX] SafeStorage를 사용하여 스토리지 접근 실패 시 메모리 Fallback 제공
+    const savedData = SafeStorage.getItem(SAVE_KEY);
     const hasSavedData = savedData && JSON.parse(savedData).messages?.length > 0;
     
+    // [FIX] 난이도가 없으면 초기화하지 않음 (난이도 선택이 완료될 때까지 대기)
+    if (!difficulty) {
+      console.warn('[ChatInterface] 난이도가 선택되지 않았습니다. 난이도 선택을 기다립니다.');
+      return;
+    }
+    
+    // [FIX] React StrictMode 중복 실행 방지: 이미 초기화가 완료되었거나 진행 중이면 건너뛰기
+    if (hasInitializedRef.current) {
+      console.log('[ChatInterface] 이미 초기화가 완료되었습니다. 중복 실행 방지.');
+      return;
+    }
+    
+    if (isInitializingRef.current) {
+      console.log('[ChatInterface] 초기화가 이미 진행 중입니다. 중복 실행 방지.');
+      return;
+    }
+    
     // 새 게임 시작 시: 저장된 데이터가 없으면 initializeGameWithData 호출
-    if (selectedTeam && messages.length === 0 && isModelReady && modelRef.current && !hasSavedData && !isInitializingRef.current) {
+    if (selectedTeam && difficulty && messages.length === 0 && isModelReady && modelRef.current && !hasSavedData) {
+      // [FIX] 초기화 시작 전 즉시 플래그 설정 (StrictMode 이중 실행 방지)
       isInitializingRef.current = true;
+      console.log('[ChatInterface] 게임 초기화 시작 (중복 실행 방지 플래그 설정)');
       
       // [CRITICAL FIX] 이전 메시지 및 채팅 인스턴스 완전 초기화
       // 화면에 표시된 모든 메시지와 AI 응답을 제거하여 API 오류 방지
@@ -1131,18 +1271,42 @@ ${difficultyConfig}
 ${facilityInfo}`;
         
         // InitialData를 포함한 전체 프롬프트 생성
-        const fullPromptWithData = `${KBO_INITIAL_DATA}
+        // [FIX] 프롬프트 최상단에 강제 주입하여 AI가 먼저 인식하도록 함
+        const fullPromptWithData = `[SYSTEM STATUS: FIXED]
+- User Selected Team: ${expansionTeamData?.teamName || '신생 구단'} (Confirmed)
+- Difficulty: ${difficultyCode} (${difficultyMode}) (Confirmed)
+- COMMAND: 위 설정을 바탕으로 즉시 2026 시즌 오프닝 리포트를 출력하라. (다시 묻지 말 것)
+
+[SYSTEM INSTRUCTION: INITIALIZATION OVERRIDE - ABSOLUTE COMMAND]
+🚫 CRITICAL: 난이도 선택 단계를 완전히 건너뛰고 즉시 게임을 시작하십시오.
+🚫 DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or "운영 난이도를 선택해주세요"
+✅ IMMEDIATELY start the game with <STATUS> and <NEWS> tags.
+
+${KBO_INITIAL_DATA}
 
 ${fullPrompt}
 
-[SYSTEM INSTRUCTION: INITIALIZATION OVERRIDE]
-1. The user has ALREADY selected the difficulty and team via the UI.
-2. DO NOT output "Welcome" text or ask for difficulty.
-3. DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or similar questions.
-4. IMMEDIATELY assume the role of the GM/Assistant.
-5. START THE GAME IMMEDIATELY with the <STATUS> dashboard for 2026-01-01 (2026년 1월 1주차), and <NEWS> tag right now.
-6. Output <OPTIONS> tag with game action buttons (일정 진행, 로스터 확인, etc.) immediately.
-7. Start directly with the game simulation. Skip all introductory steps and go directly to the main game screen.`;
+[SYSTEM INSTRUCTION: INITIALIZATION OVERRIDE - ABSOLUTE COMMAND]
+🚫 CRITICAL: 난이도 선택 단계를 완전히 건너뛰고 즉시 게임을 시작하십시오.
+
+1. The user has ALREADY selected the difficulty (${difficultyCode}) and team (${expansionTeamData?.teamName || '신생 구단'}) via the UI.
+2. 🚫 DO NOT output "Welcome" text or ask for difficulty.
+3. 🚫 DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or "운영 난이도를 선택해주세요" or ANY similar questions.
+4. 🚫 DO NOT output difficulty selection buttons or options.
+5. ✅ IMMEDIATELY assume the role of the GM/Assistant.
+6. ✅ START THE GAME IMMEDIATELY with the <STATUS> dashboard for 2026-01-01 (2026년 1월 1주차), and <NEWS> tag right now.
+7. ✅ Output <OPTIONS> tag with game action buttons (일정 진행, 로스터 확인, etc.) immediately.
+8. ✅ Start directly with the game simulation. Skip all introductory steps and go directly to the main game screen.
+
+**REMEMBER:** If you see [SYSTEM STATUS: FIXED] in the prompt, it means the user has ALREADY completed all setup steps. Do NOT ask for difficulty or team selection again.`;
+        
+        // 🚀 [CRITICAL DEBUG] 생성된 프롬프트 검증
+        console.log('🚀 [Expansion Prompt Generated]');
+        console.log('📋 [Prompt] Includes team name?', fullPromptWithData.includes(expansionTeamData?.teamName || '신생 구단'));
+        console.log('📋 [Prompt] Includes difficulty?', fullPromptWithData.includes(difficultyMode) && fullPromptWithData.includes(difficultyCode));
+        console.log('📋 [Prompt] Includes SYSTEM STATUS UPDATE?', fullPromptWithData.includes('[SYSTEM STATUS UPDATE]'));
+        console.log('📋 [Prompt] Full length:', fullPromptWithData.length);
+        console.log('📋 [Prompt] First 1000 chars:', fullPromptWithData.substring(0, 1000));
         
         // [Cost Optimization] 모델 초기화 후 팀 정보 전송하여 GM Office Report 생성
         // 이미 모델이 있으면 재사용 (중복 호출 방지)
@@ -1169,30 +1333,92 @@ ${fullPrompt}
             
             setTimeout(() => {
               try {
+                // [FIX] Force Context Injection - null 체크 및 강제 주입 검증
+                if (!selectedTeam || !difficulty) {
+                  console.error('[초기화 실패] selectedTeam 또는 difficulty가 null입니다.', { selectedTeam, difficulty });
+                  alert('팀 또는 난이도가 선택되지 않았습니다. 다시 시도해주세요.');
+                  setIsLoading(false);
+                  // [FIX] 에러 발생 시에도 초기화 완료로 표시하여 재시도 방지
+                  isInitializingRef.current = false;
+                  hasInitializedRef.current = true;
+                  return;
+                }
+                
                 console.log('[초기화] handleSend 호출 시도...', { 
                   messageLength: fullPromptWithData.length,
                   isLoadingRef: isLoadingRef.current 
                 });
+                
+                // 🚀 [CRITICAL DEBUG] handleSend 호출 직전 최종 검증 (일반 구단)
+                console.log('🚀 [Before handleSend Call - Regular Team]');
+                console.log('📋 [Final Check] selectedTeam:', selectedTeam);
+                console.log('📋 [Final Check] difficulty:', difficulty);
+                console.log('📋 [Final Check] fullPromptWithData includes team?', fullPromptWithData.includes(selectedTeam?.fullName || selectedTeam?.name || ''));
+                console.log('📋 [Final Check] fullPromptWithData includes difficulty?', fullPromptWithData.includes(difficulty || ''));
+                console.log('📋 [Final Check] fullPromptWithData length:', fullPromptWithData.length);
+                
+                // [FIX] Verification: API 전송 직전 프롬프트 검증
+                console.log('🔍 [Verification] Sending Prompt (first 2000 chars):', fullPromptWithData.substring(0, 2000));
+                console.log('🔍 [Verification] Prompt includes [SYSTEM STATUS: FIXED]?', fullPromptWithData.includes('[SYSTEM STATUS'));
+                console.log('🔍 [Verification] Prompt includes team name?', fullPromptWithData.includes(selectedTeam.fullName));
+                console.log('🔍 [Verification] Prompt includes difficulty code?', fullPromptWithData.includes(difficultyCode));
+                
                 // handleSend를 직접 호출
                 handleSend(fullPromptWithData, { hideFromUI: true });
-              } catch (error) {
+                // [FIX] 초기화 요청 전송 완료: StrictMode 이중 실행 방지를 위해 완료 플래그 설정
+                // 실제 응답은 handleSend 내부에서 처리되지만, 요청 전송 자체가 완료되었으므로 중복 방지
+                setTimeout(() => {
+                  if (isInitializingRef.current) {
+                    console.log('[ChatInterface] 초기화 요청 전송 완료: 완료 플래그 설정');
+                    isInitializingRef.current = false;
+                    hasInitializedRef.current = true;
+                  }
+                }, 1000); // 1초 후 완료 플래그 설정 (요청이 전송되었음을 보장)
+                } catch (error) {
                 console.error('[초기화] handleSend 호출 실패:', error);
                 setIsLoading(false);
+                // [FIX] 에러 발생 시에도 초기화 완료로 표시하여 재시도 방지
                 isInitializingRef.current = false;
-                alert('게임 초기화에 실패했습니다. 페이지를 새로고침해주세요.');
+                hasInitializedRef.current = true;
+                
+                // [UPDATE] 429 Quota Exceeded 에러 핸들링 추가
+                if (isQuotaExceededError(error)) {
+                  alert(getQuotaExceededAlertMessage());
+                } else {
+                  alert('게임 초기화에 실패했습니다. 페이지를 새로고침해주세요.');
+                }
               }
             }, 300);
           })
           .catch((error) => {
             console.error('게임 초기화 실패:', error);
-            alert('게임 초기화에 실패했습니다. 다시 시도해주세요.');
+            
+            // [UPDATE] 429 Quota Exceeded 에러 핸들링 추가
+            if (isQuotaExceededError(error)) {
+              alert(getQuotaExceededAlertMessage());
+            } else {
+              alert('게임 초기화에 실패했습니다. 다시 시도해주세요.');
+            }
+            
             setIsLoading(false);
+            // [FIX] 에러 발생 시에도 초기화 완료로 표시하여 재시도 방지
             isInitializingRef.current = false;
+            hasInitializedRef.current = true;
           });
-      } else {
-        // 일반 구단인 경우
+       } else if (selectedTeam && difficulty) {
+         // 일반 구단인 경우
+        // 🚀 [CRITICAL DEBUG] 일반 구단 프롬프트 생성 시점
+        console.log('🚀 [Regular Team Prompt Generation]');
+        console.log('📋 [State] selectedTeam:', selectedTeam);
+        console.log('📋 [State] selectedTeam.fullName:', selectedTeam?.fullName);
+        console.log('📋 [State] difficulty:', difficulty);
+        
         const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
         const difficultyCode = difficulty;
+        
+        // 🚀 [DEBUG] 난이도 변환 확인
+        console.log('📋 [Regular] difficultyMode:', difficultyMode);
+        console.log('📋 [Regular] difficultyCode:', difficultyCode);
         const difficultyConfig = difficulty === 'EASY' 
           ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
           : difficulty === 'NORMAL'
@@ -1219,18 +1445,42 @@ ${difficultyConfig}
 ${facilityInfo}`;
         
         // InitialData를 포함한 전체 프롬프트 생성
-        const fullPromptWithData = `${KBO_INITIAL_DATA}
+        // [FIX] 프롬프트 최상단에 강제 주입하여 AI가 먼저 인식하도록 함
+        const fullPromptWithData = `[SYSTEM STATUS: FIXED]
+- User Selected Team: ${selectedTeam.fullName} (Confirmed)
+- Difficulty: ${difficultyCode} (${difficultyMode}) (Confirmed)
+- COMMAND: 위 설정을 바탕으로 즉시 2026 시즌 오프닝 리포트를 출력하라. (다시 묻지 말 것)
+
+[SYSTEM INSTRUCTION: INITIALIZATION OVERRIDE - ABSOLUTE COMMAND]
+🚫 CRITICAL: 난이도 선택 단계를 완전히 건너뛰고 즉시 게임을 시작하십시오.
+🚫 DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or "운영 난이도를 선택해주세요"
+✅ IMMEDIATELY start the game with <STATUS> and <NEWS> tags.
+
+${KBO_INITIAL_DATA}
 
 ${fullPrompt}
 
-[SYSTEM INSTRUCTION: INITIALIZATION OVERRIDE]
-1. The user has ALREADY selected the difficulty and team via the UI.
-2. DO NOT output "Welcome" text or ask for difficulty.
-3. DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or similar questions.
-4. IMMEDIATELY assume the role of the GM/Assistant.
-5. START THE GAME IMMEDIATELY with the <STATUS> dashboard for 2026-01-01 (2026년 1월 1주차), and <NEWS> tag right now.
-6. Output <OPTIONS> tag with game action buttons (일정 진행, 로스터 확인, etc.) immediately.
-7. Start directly with the game simulation. Skip all introductory steps and go directly to the main game screen.`;
+[SYSTEM INSTRUCTION: INITIALIZATION OVERRIDE - ABSOLUTE COMMAND]
+🚫 CRITICAL: 난이도 선택 단계를 완전히 건너뛰고 즉시 게임을 시작하십시오.
+
+1. The user has ALREADY selected the difficulty (${difficultyCode}) and team (${selectedTeam.fullName}) via the UI.
+2. 🚫 DO NOT output "Welcome" text or ask for difficulty.
+3. 🚫 DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or "운영 난이도를 선택해주세요" or ANY similar questions.
+4. 🚫 DO NOT output difficulty selection buttons or options.
+5. ✅ IMMEDIATELY assume the role of the GM/Assistant.
+6. ✅ START THE GAME IMMEDIATELY with the <STATUS> dashboard for 2026-01-01 (2026년 1월 1주차), and <NEWS> tag right now.
+7. ✅ Output <OPTIONS> tag with game action buttons (일정 진행, 로스터 확인, etc.) immediately.
+8. ✅ Start directly with the game simulation. Skip all introductory steps and go directly to the main game screen.
+
+**REMEMBER:** If you see [SYSTEM STATUS: FIXED] in the prompt, it means the user has ALREADY completed all setup steps. Do NOT ask for difficulty or team selection again.`;
+        
+        // 🚀 [CRITICAL DEBUG] 생성된 프롬프트 검증
+        console.log('🚀 [Regular Team Prompt Generated]');
+        console.log('📋 [Prompt] Includes team name?', fullPromptWithData.includes(selectedTeam.fullName));
+        console.log('📋 [Prompt] Includes difficulty?', fullPromptWithData.includes(difficultyMode) && fullPromptWithData.includes(difficultyCode));
+        console.log('📋 [Prompt] Includes SYSTEM STATUS UPDATE?', fullPromptWithData.includes('[SYSTEM STATUS UPDATE]'));
+        console.log('📋 [Prompt] Full length:', fullPromptWithData.length);
+        console.log('📋 [Prompt] First 1000 chars:', fullPromptWithData.substring(0, 1000));
         
         // [Cost Optimization] 모델 초기화 후 팀 정보 전송하여 GM Office Report 생성
         // 이미 모델이 있으면 재사용 (중복 호출 방지)
@@ -1266,18 +1516,44 @@ ${fullPrompt}
               } catch (error) {
                 console.error('[초기화] handleSend 호출 실패:', error);
                 setIsLoading(false);
+                // [FIX] 에러 발생 시에도 초기화 완료로 표시하여 재시도 방지
                 isInitializingRef.current = false;
-                alert('게임 초기화에 실패했습니다. 페이지를 새로고침해주세요.');
+                hasInitializedRef.current = true;
+                
+                // [UPDATE] 429 Quota Exceeded 에러 핸들링 추가
+                if (isQuotaExceededError(error)) {
+                  alert(getQuotaExceededAlertMessage());
+                } else {
+                  alert('게임 초기화에 실패했습니다. 페이지를 새로고침해주세요.');
+                }
               }
             }, 300);
           })
           .catch((error) => {
             console.error('게임 초기화 실패:', error);
-            alert('게임 초기화에 실패했습니다. 다시 시도해주세요.');
+            
+            // [UPDATE] 429 Quota Exceeded 에러 핸들링 추가
+            if (isQuotaExceededError(error)) {
+              alert(getQuotaExceededAlertMessage());
+            } else {
+              alert('게임 초기화에 실패했습니다. 다시 시도해주세요.');
+            }
+            
             setIsLoading(false);
+            // [FIX] 에러 발생 시에도 초기화 완료로 표시하여 재시도 방지
             isInitializingRef.current = false;
+            hasInitializedRef.current = true;
           });
       }
+      
+      // [FIX] useEffect cleanup 함수: 컴포넌트 언마운트 시에도 초기화 완료 표시
+      return () => {
+        if (isInitializingRef.current) {
+          console.log('[ChatInterface] 컴포넌트 언마운트: 초기화 중단 및 완료 표시');
+          isInitializingRef.current = false;
+          hasInitializedRef.current = true;
+        }
+      };
       
       // [NOTE] setIsLoading(false)는 handleSend 내부에서 관리되므로 여기서는 제거
       // 모델 초기화와 메시지 전송이 비동기로 실행되므로, 로딩 상태는 handleSend에서 관리
@@ -1335,11 +1611,18 @@ ${fullPrompt}
   }, [messages]);
 
   // 메시지 변경 시 헤더 정보 업데이트
+  // [FIX] 스트리밍 완료 후에만 파싱하도록 수정 (로그 중복 방지)
   useEffect(() => {
-    // 마지막 AI 메시지에서 날짜와 자금 정보 추출
+    // 스트리밍 중이면 파싱하지 않음
     const aiMessages = messages.filter(m => !m.isUser);
     if (aiMessages.length > 0) {
       const lastAIMessage = aiMessages[aiMessages.length - 1];
+      
+      // [FIX] 스트리밍 중이면 파싱 건너뛰기
+      if (lastAIMessage.isStreaming) {
+        return; // 스트리밍 중에는 파싱하지 않음
+      }
+      
       const parsed = parseAIResponse(lastAIMessage.text);
       
       // 날짜 추출 (STATUS 태그 우선, 없으면 텍스트에서 추출)
@@ -1788,8 +2071,8 @@ ${definition.effect(result.newLevel).description}
     try {
       const saveData = getSaveData();
       
-      // [NEW] 로컬 저장소에 저장
-      localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+      // [FIX] SafeStorage를 사용하여 스토리지 접근 실패 시 메모리 Fallback 제공
+      SafeStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
       
       playSound('success');
       alert('게임이 저장되었습니다!');
@@ -2015,7 +2298,8 @@ ${definition.effect(result.newLevel).description}
     isLoadProcessingRef.current = true;
     
     try {
-      const savedData = localStorage.getItem(SAVE_KEY);
+      // [FIX] SafeStorage를 사용하여 스토리지 접근 실패 시 메모리 Fallback 제공
+      const savedData = SafeStorage.getItem(SAVE_KEY);
       if (!savedData) {
         alert('저장된 게임이 없습니다.\n\n새 게임을 시작하거나 파일에서 불러오기를 시도해주세요.');
         isLoadProcessingRef.current = false;
@@ -2246,6 +2530,10 @@ ${definition.effect(result.newLevel).description}
             setIsResultOpen(true);
             playSound('click');
           }}
+          onMonitoringClick={() => {
+            setIsMonitoringOpen(true);
+            playSound('click');
+          }}
         />
       </div>
 
@@ -2472,6 +2760,12 @@ ${definition.effect(result.newLevel).description}
         myTeam={selectedTeam.id === 'expansion' 
           ? (expansionTeamData?.teamName || selectedTeam.fullName)
           : (gameState.teamName || selectedTeam.fullName)}
+      />
+
+      {/* 모니터링 대시보드 */}
+      <MonitoringDashboard
+        isOpen={isMonitoringOpen}
+        onClose={() => setIsMonitoringOpen(false)}
       />
 
       {/* 경기 결과 모달 */}

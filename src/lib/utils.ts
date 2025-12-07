@@ -330,21 +330,58 @@ export function extractPlayerNamesFromInitialData(
   return playerNames;
 }
 
+// [FIX] 로스터 데이터 완결성 보장 - 최소 선수 수 상수
+const MIN_PITCHER_COUNT = 20; // 최소 투수 수 (1군 + 2군 합계)
+const MIN_BATTER_COUNT = 30; // 최소 타자 수 (1군 + 2군 합계)
+const MIN_TOTAL_ROSTER_COUNT = 50; // 최소 전체 로스터 수
+
 /**
  * [Roster-Validation] 로스터 무결성 검사 추가
  * AI 응답에서 파싱된 로스터와 현재 로스터를 비교하여 유효성을 검증합니다.
  * @param newRoster AI가 보고한 새로운 로스터
  * @param currentRoster 현재 게임 상태의 로스터 (비교 기준)
  * @param initialDataPlayerNames InitialData.ts에서 추출한 선수 이름 Set (선택적, 있으면 InitialData.ts와 비교)
- * @returns 검증 결과 { isValid: boolean, errors: string[], warnings: string[] }
+ * @returns 검증 결과 { isValid: boolean, errors: string[], warnings: string[], isTruncated: boolean }
  */
 export function validateRosterIntegrity(
   newRoster: Player[],
   currentRoster: Player[],
   initialDataPlayerNames?: Set<string>
-): RosterValidationResult {
+): RosterValidationResult & { isTruncated?: boolean } {
   const errors: string[] = [];
   const warnings: string[] = [];
+  let isTruncated = false;
+
+  // [FIX] 검증 로직 0: 최소 개수 체크 (로스터 데이터 잘림 감지)
+  const pitchers = newRoster.filter(p => p.type === 'pitcher' || p.position?.includes('투수') || p.position?.includes('선발') || p.position?.includes('중간') || p.position?.includes('마무리'));
+  const batters = newRoster.filter(p => p.type === 'batter' || (!p.type && !pitchers.includes(p)));
+  
+  if (pitchers.length < MIN_PITCHER_COUNT) {
+    isTruncated = true;
+    errors.push(
+      `[⚠️ Roster Truncated!] 투수진 데이터가 잘렸습니다. ` +
+      `예상 최소: ${MIN_PITCHER_COUNT}명, 실제: ${pitchers.length}명 ` +
+      `(부족: ${MIN_PITCHER_COUNT - pitchers.length}명)`
+    );
+  }
+  
+  if (batters.length < MIN_BATTER_COUNT) {
+    isTruncated = true;
+    errors.push(
+      `[⚠️ Roster Truncated!] 타자진 데이터가 잘렸습니다. ` +
+      `예상 최소: ${MIN_BATTER_COUNT}명, 실제: ${batters.length}명 ` +
+      `(부족: ${MIN_BATTER_COUNT - batters.length}명)`
+    );
+  }
+  
+  if (newRoster.length < MIN_TOTAL_ROSTER_COUNT) {
+    isTruncated = true;
+    errors.push(
+      `[⚠️ Roster Truncated!] 전체 로스터 데이터가 잘렸습니다. ` +
+      `예상 최소: ${MIN_TOTAL_ROSTER_COUNT}명, 실제: ${newRoster.length}명 ` +
+      `(부족: ${MIN_TOTAL_ROSTER_COUNT - newRoster.length}명)`
+    );
+  }
 
   // 검증 로직 1: 수량 체크
   if (currentRoster.length > 0) {
@@ -470,6 +507,7 @@ export function validateRosterIntegrity(
     isValid,
     errors,
     warnings,
+    isTruncated, // [FIX] 로스터 데이터 잘림 여부 반환
   };
 }
 

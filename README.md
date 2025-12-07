@@ -45,6 +45,16 @@ npm run build
 3. 시스템 프롬프트는 `src/constants/prompts/SystemLogic.ts`의 `KBO_SYSTEM_LOGIC`에 설정되어 있습니다.
 4. 게임 설정(난이도별 자금, 샐러리캡 등)은 `src/constants/GameConfig.ts`에서 관리됩니다.
 
+## 📚 문서
+
+프로젝트의 모든 문서는 **[docs/](./docs/)** 폴더에 정리되어 있습니다:
+
+- 📝 **[패치 노트](./docs/patches/)** - 버전별 업데이트 내용
+- 📊 **[보고서](./docs/reports/)** - 최적화, 성능, 기능 상태 보고서
+- 🔍 **[진단 리포트](./docs/analysis/)** - 구조 분석, 버전 비교
+- 🎯 **[구현 전략](./docs/strategies/)** - 설계 및 기술 문서
+- 🏗️ **[프로젝트 구조](./docs/structure/)** - 구조 및 아키텍처 문서
+
 ## 배포하기
 
 다른 사람들이 PC나 모바일에서 플레이할 수 있도록 배포하는 방법은 **[DEPLOY.md](./DEPLOY.md)** 파일을 참고하세요.

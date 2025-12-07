@@ -1,4 +1,4 @@
-import { Calendar, DollarSign, Building2, Trophy, KeyRound, Database, Receipt, MonitorPlay } from 'lucide-react';
+import { Calendar, DollarSign, Building2, Trophy, KeyRound, Database, Receipt, MonitorPlay, BarChart3 } from 'lucide-react';
 import { Difficulty } from '../constants/GameConfig';
 import { getTeamNickname } from '../lib/utils';
 
@@ -14,6 +14,7 @@ interface GameHeaderProps {
   onStandingsClick?: () => void;
   onTransactionClick?: () => void;
   onResultClick?: () => void;
+  onMonitoringClick?: () => void;
 }
 
 export default function GameHeader({ 
@@ -27,7 +28,8 @@ export default function GameHeader({
   onSaveLoadClick,
   onStandingsClick,
   onTransactionClick,
-  onResultClick
+  onResultClick,
+  onMonitoringClick
 }: GameHeaderProps) {
   // budget이 null이거나 0이면 "시즌 준비 중" 표시
   const displayBudget = (budget !== null && budget > 0) ? budget.toLocaleString('ko-KR') + '원' : '시즌 준비 중';
@@ -62,8 +64,8 @@ export default function GameHeader({
               <Trophy className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span className="text-xs sm:text-sm font-semibold">{season}</span>
             </div>
-            {/* 경영 대시보드 버튼 (순위표, 장부, 경기 결과) */}
-            {(onStandingsClick || onTransactionClick || onResultClick) && (
+            {/* 경영 대시보드 버튼 (순위표, 장부, 경기 결과, 모니터링) */}
+            {(onStandingsClick || onTransactionClick || onResultClick || onMonitoringClick) && (
               <>
                 <span className="hidden sm:inline text-baseball-gold/60">|</span>
                 <div className="hidden sm:flex items-center gap-0.5 sm:gap-1">
@@ -95,6 +97,16 @@ export default function GameHeader({
                     >
                       <MonitorPlay className="w-4 h-4 sm:w-4 sm:h-4 text-white group-hover:text-baseball-gold transition-colors" />
                       <span className="hidden lg:inline ml-1 text-xs text-white group-hover:text-baseball-gold transition-colors">경기 결과</span>
+                    </button>
+                  )}
+                  {onMonitoringClick && (
+                    <button
+                      onClick={onMonitoringClick}
+                      className="p-1 sm:p-1.5 hover:bg-white/10 rounded transition-colors touch-manipulation min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center group"
+                      title="모니터링 대시보드"
+                    >
+                      <BarChart3 className="w-4 h-4 sm:w-4 sm:h-4 text-white group-hover:text-baseball-gold transition-colors" />
+                      <span className="hidden lg:inline ml-1 text-xs text-white group-hover:text-baseball-gold transition-colors">모니터링</span>
                     </button>
                   )}
                 </div>

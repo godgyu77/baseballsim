@@ -6,6 +6,11 @@ export default defineConfig({
   plugins: [react()],
   // 배포 시 base 경로 설정 (필요시 수정)
   // base: '/baseball/',
+  optimizeDeps: {
+    // 의존성 최적화 문제 해결을 위한 설정
+    force: true, // 강제로 재최적화
+    exclude: [], // 문제가 되는 패키지가 있으면 여기에 추가
+  },
   build: {
     rollupOptions: {
       output: {

@@ -8,39 +8,182 @@ import { retryRequest } from './retryUtils';
 export const GEMINI_MODEL = 'gemini-2.5-flash';
 
 /**
- * [Cost Optimization] 모델 인스턴스 캐시
+ * [Context Caching] 캐시된 컨텐츠의 이름(ID)을 저장할 변수
+ * API 레벨 캐싱을 사용하여 System Instruction 토큰 비용을 절감합니다.
+ */
+let activeCacheName: string | null = null;
+let cacheCreationAttempted = false; // 캐시 생성 시도 여부 (중복 시도 방지)
+
+/**
+ * [Cost Optimization] 모델 인스턴스 캐시 (로컬 변수)
  * 같은 API 키에 대해 모델 인스턴스를 재사용하여 불필요한 객체 생성을 방지합니다.
  * 
- * [Analysis] 문제점:
- * - 기존: 매번 새로운 GoogleGenerativeAI 인스턴스 생성 → 메모리 및 초기화 오버헤드
- * - 개선: Map 기반 캐싱으로 같은 API 키에 대해 인스턴스 재사용
- * 
- * [Expected Savings]: 모델 초기화 오버헤드 100% 제거, 중복 호출 시 즉시 반환
+ * ⚠️ 참고: 이것은 로컬 변수 재사용이며, API 레벨 Context Caching(cachedContent)과는 별개입니다.
  */
 const modelCache = new Map<string, any>();
 
 /**
- * [Cost Optimization] Gemini 모델 인스턴스 가져오기 (캐싱 적용)
+ * [Context Caching] 브라우저 환경에서 cachedContent 생성 시도
+ * 
+ * @param genAI GoogleGenerativeAI 인스턴스
+ * @param apiKey API 키
+ * @returns 캐시 이름 또는 null (생성 실패 시)
+ */
+async function tryCreateCachedContent(genAI: GoogleGenerativeAI, apiKey: string): Promise<string | null> {
+  // [CRITICAL] 브라우저 환경에서 cachedContent 생성은 제한될 수 있습니다.
+  // Google Gemini API의 cachedContent는 주로 서버 사이드(Node.js/Python)에서 사용됩니다.
+  // 브라우저에서 직접 생성하려면 CORS 및 보안 정책을 통과해야 합니다.
+  
+  try {
+    // [CHECK] SDK에서 cachedContent 생성 메서드 확인
+    // @google/generative-ai SDK 버전에 따라 API가 다를 수 있습니다.
+    
+    // 방법 1: getGenerativeModel을 통해 cachedContent 생성 시도
+    const tempModel = genAI.getGenerativeModel({
+      model: GEMINI_MODEL,
+    });
+    
+    // [ATTEMPT] cachedContent 생성 (SDK 버전에 따라 다를 수 있음)
+    // 참고: 최신 SDK에서는 createCachedContent가 모델 인스턴스에 있을 수 있습니다.
+    if (typeof (tempModel as any).createCachedContent === 'function') {
+      console.log('[Context Caching] ⚡ 브라우저에서 cachedContent 생성 시도...');
+      
+      const cache = await (tempModel as any).createCachedContent({
+        model: GEMINI_MODEL,
+        contents: [{
+          role: 'system',
+          parts: [{ text: KBO_SYSTEM_LOGIC }],
+        }],
+        ttlSeconds: 60 * 60, // 1시간 유지
+      });
+      
+      if (cache && cache.name) {
+        console.log(`[Context Caching] ✅ 캐시 생성 성공: ${cache.name}`);
+        return cache.name;
+      }
+    }
+    
+    // 방법 2: genAI 인스턴스에서 직접 생성 시도
+    if (typeof (genAI as any).createCachedContent === 'function') {
+      console.log('[Context Caching] ⚡ genAI에서 cachedContent 생성 시도...');
+      
+      const cache = await (genAI as any).createCachedContent({
+        model: GEMINI_MODEL,
+        contents: [{
+          role: 'system',
+          parts: [{ text: KBO_SYSTEM_LOGIC }],
+        }],
+        ttlSeconds: 60 * 60,
+      });
+      
+      if (cache && cache.name) {
+        console.log(`[Context Caching] ✅ 캐시 생성 성공: ${cache.name}`);
+        return cache.name;
+      }
+    }
+    
+    // 방법 3: CachedContentManager 사용 시도
+    if (typeof (genAI as any).getCachedContentManager === 'function') {
+      console.log('[Context Caching] ⚡ CachedContentManager 사용 시도...');
+      
+      const manager = (genAI as any).getCachedContentManager();
+      if (manager && typeof manager.create === 'function') {
+        const cache = await manager.create({
+          model: GEMINI_MODEL,
+          contents: [{
+            role: 'system',
+            parts: [{ text: KBO_SYSTEM_LOGIC }],
+          }],
+          ttlSeconds: 60 * 60,
+        });
+        
+        if (cache && cache.name) {
+          console.log(`[Context Caching] ✅ 캐시 생성 성공: ${cache.name}`);
+          return cache.name;
+        }
+      }
+    }
+    
+    // 모든 방법 실패
+    console.warn('[Context Caching] ⚠️ 브라우저 환경에서 cachedContent 생성 실패: SDK에서 지원하지 않거나 CORS 제한');
+    return null;
+    
+  } catch (error: any) {
+    // [FALLBACK] 브라우저 환경에서 cachedContent 생성이 불가능한 경우
+    console.warn('[Context Caching] ⚠️ 브라우저 환경에서 cachedContent 생성 불가:', error.message);
+    console.warn('[Context Caching] 💡 해결책: 서버 사이드(Node.js/Python)에서 cachedContent를 생성하고, 브라우저에서는 캐시 이름만 사용하세요.');
+    return null;
+  }
+}
+
+/**
+ * [Cost Optimization] Gemini 모델 인스턴스 가져오기 (Context Caching 적용)
  * 
  * @param apiKey Gemini API 키
  * @returns 캐시된 모델 인스턴스 또는 새로 생성한 인스턴스
  */
 export async function getGeminiModel(apiKey: string) {
-  // [Cost Optimization] 캐시 확인: 같은 API 키로 이미 생성된 모델이 있으면 재사용
+  const genAI = new GoogleGenerativeAI(apiKey);
+  
+  // [Context Caching] 1. 이미 캐시가 생성되어 있다면, 해당 캐시 ID를 사용하여 가벼운 모델 생성
+  if (activeCacheName) {
+    console.log(`[Context Caching] ✅ Using Active Cache: ${activeCacheName.substring(0, 20)}...`);
+    const model = genAI.getGenerativeModel({
+      model: GEMINI_MODEL,
+      cachedContent: activeCacheName, // 캐시된 컨텐츠 사용 (System Instruction 토큰 비용 0원)
+    });
+    
+    // 로컬 캐시에도 저장 (객체 재사용)
+    if (!modelCache.has(apiKey)) {
+      modelCache.set(apiKey, model);
+    }
+    
+    return model;
+  }
+  
+  // [Context Caching] 2. 캐시가 없다면 생성 시도 (최초 1회만)
+  if (!cacheCreationAttempted) {
+    cacheCreationAttempted = true;
+    console.log('[Context Caching] ⚡ Creating New Cache on Server...');
+    
+    const cacheName = await tryCreateCachedContent(genAI, apiKey);
+    
+    if (cacheName) {
+      // 캐시 생성 성공: 캐시 이름 저장
+      activeCacheName = cacheName;
+      
+      // 캐시된 컨텐츠를 사용하여 모델 생성
+      const model = genAI.getGenerativeModel({
+        model: GEMINI_MODEL,
+        cachedContent: activeCacheName,
+      });
+      
+      modelCache.set(apiKey, model);
+      console.log('[Context Caching] ✅ Context Caching 활성화: System Instruction 토큰 비용 절감');
+      return model;
+    } else {
+      // 캐시 생성 실패: 기존 방식으로 fallback
+      console.warn('[Context Caching] ⚠️ 브라우저 환경에서 Context Caching 불가: 기존 방식 사용 (System Instruction 매번 전송)');
+    }
+  }
+  
+  // [Fallback] 캐시 생성 실패 또는 브라우저 환경 제한: 기존 방식 사용
+  // ⚠️ 주의: 이것은 로컬 변수 재사용이며, API 레벨 Context Caching(cachedContent)이 아닙니다.
+  // System Instruction은 매 요청마다 토큰으로 계산됩니다.
   if (modelCache.has(apiKey)) {
-    console.log('[Cost Optimization] 모델 인스턴스 캐시에서 재사용:', apiKey.substring(0, 10) + '...');
+    console.log('[Cost Optimization] 모델 인스턴스 캐시에서 재사용 (로컬 변수, API 레벨 캐싱 아님):', apiKey.substring(0, 10) + '...');
     return modelCache.get(apiKey)!;
   }
 
   // [Cost Optimization] 캐시에 없으면 새로 생성하고 캐시에 저장
-  console.log('[Cost Optimization] 새 모델 인스턴스 생성 및 캐싱:', apiKey.substring(0, 10) + '...');
-  const genAI = new GoogleGenerativeAI(apiKey);
+  console.log('[Cost Optimization] 새 모델 인스턴스 생성 및 캐싱 (로컬 변수, API 레벨 캐싱 아님):', apiKey.substring(0, 10) + '...');
   const model = genAI.getGenerativeModel({
     model: GEMINI_MODEL,
     systemInstruction: KBO_SYSTEM_LOGIC || '당신은 야구 매니지먼트 게임의 게임마스터입니다.',
   });
   
   // [Cost Optimization] 캐시에 저장하여 다음 호출 시 재사용
+  // ⚠️ 참고: 실제 API 레벨 Context Caching(cachedContent)을 사용하려면 서버 사이드 구현이 필요합니다.
   modelCache.set(apiKey, model);
   
   return model;
@@ -59,6 +202,11 @@ export function clearModelCache(apiKey?: string) {
     modelCache.clear();
     console.log('[Cost Optimization] 전체 모델 캐시 초기화');
   }
+  
+  // [Context Caching] 캐시 이름도 초기화
+  activeCacheName = null;
+  cacheCreationAttempted = false;
+  console.log('[Context Caching] 캐시 이름 초기화 완료');
 }
 
 /**
@@ -100,7 +248,7 @@ export async function initializeGameWithData(
   const chat = model.startChat({
     history: [], // [CRITICAL] 변수를 넣지 말고 빈 배열을 직접 하드코딩할 것!
     generationConfig: {
-      maxOutputTokens: 8000, // 최대 출력 토큰 수 설정
+      maxOutputTokens: 16384, // [FIX] 로스터 데이터 완결성 보장: 8000 -> 16384로 증가 (투수+타자 전체 데이터 수용)
     },
   });
   
@@ -140,5 +288,3 @@ ${initPromptText}
   
   return result;
 }
-
-

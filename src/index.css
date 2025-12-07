@@ -259,12 +259,39 @@ div[class*="overflow-x-auto"] > div {
   max-width: 80px !important;
 }
 
-/* 타자 표 14번째 컬럼 (원소속 구단) */
+/* 타자 표 14번째 컬럼 (원소속 구단) - [FIX] 누락된 스타일 추가 */
 .batter-table th:nth-child(14),
 .batter-table td:nth-child(14) {
   width: 80px !important;
   min-width: 80px !important;
   max-width: 80px !important;
+}
+
+/* 타자 표 15번째 컬럼 (추가 컬럼 대비) - [FIX] 안전장치 */
+.batter-table th:nth-child(15),
+.batter-table td:nth-child(15) {
+  width: 80px !important;
+  min-width: 80px !important;
+  max-width: 80px !important;
+}
+
+/* 빈 줄 숨기기 - 연속된 빈 줄 제거 */
+/* ReactMarkdown이 생성하는 빈 p 태그 숨기기 */
+p:empty,
+p:only-child:empty,
+p:has(> br:only-child),
+p:has(> br:first-child:last-child) {
+  display: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 0 !important;
+}
+
+/* 연속된 빈 줄이 여러 개일 때도 숨기기 */
+p + p:empty,
+p + p:has(> br:only-child) {
+  display: none !important;
 }
 
 /* 모바일에서 표 최적화 */

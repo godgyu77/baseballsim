@@ -12,6 +12,7 @@ import { Difficulty } from './constants/GameConfig';
 import { FileStorageStrategy } from './services/FileStorageStrategy';
 import { GameSaveData } from './services/StorageService';
 import LoadGameModal from './components/LoadGameModal';
+import { SafeStorage } from './lib/safeStorage';
 
 const SAVE_KEY = 'baseball_game_save';
 
@@ -29,8 +30,8 @@ function AppContent() {
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
 
   useEffect(() => {
-    // 로컬 스토리지에서 API 키 확인
-    const savedApiKey = localStorage.getItem('gemini_api_key');
+    // [FIX] SafeStorage를 사용하여 스토리지 접근 실패 시 메모리 Fallback 제공
+    const savedApiKey = SafeStorage.getItem('gemini_api_key');
     if (savedApiKey) {
       setApiKey(savedApiKey);
       setShowApiKeyModal(false);
@@ -38,13 +39,15 @@ function AppContent() {
   }, []);
 
   const handleApiKeySet = (key: string) => {
-    localStorage.setItem('gemini_api_key', key);
+    // [FIX] SafeStorage를 사용하여 스토리지 접근 실패 시 메모리 Fallback 제공
+    SafeStorage.setItem('gemini_api_key', key);
     setApiKey(key);
     setShowApiKeyModal(false);
   };
 
   const handleResetApiKey = () => {
-    localStorage.removeItem('gemini_api_key');
+    // [FIX] SafeStorage를 사용하여 스토리지 접근 실패 시 메모리 Fallback 제공
+    SafeStorage.removeItem('gemini_api_key');
     setApiKey('');
     setShowApiKeyModal(true);
     setScreenView('start');
@@ -57,12 +60,29 @@ function AppContent() {
       // 신생 구단 선택 시 정보 입력 화면으로 이동
       setScreenView('expansion_form');
     } else {
+      // [FIX] 난이도가 선택되었는지 확인 후 게임 화면으로 이동
+      // 상태 업데이트가 비동기이므로, 난이도가 없으면 팀 선택 화면 유지
+      if (!difficulty) {
+        console.warn('[App] 난이도가 선택되지 않았습니다. 난이도를 먼저 선택해주세요.');
+        // 난이도 선택 화면으로 돌아가기
+        setScreenView('difficulty_select');
+        return;
+      }
+      
       setSelectedTeam(team);
       setScreenView('game');
     }
   };
 
   const handleExpansionTeamComplete = (data: { city: string; teamName: string; ownerType: OwnerType }) => {
+    // [FIX] 난이도가 선택되었는지 확인 후 게임 화면으로 이동
+    if (!difficulty) {
+      console.warn('[App] 난이도가 선택되지 않았습니다. 난이도를 먼저 선택해주세요.');
+      // 난이도 선택 화면으로 돌아가기
+      setScreenView('difficulty_select');
+      return;
+    }
+    
     setExpansionTeamData(data);
     // 신생 구단 정보를 바탕으로 팀 객체 생성
     const expansionTeam: Team = {
@@ -78,13 +98,16 @@ function AppContent() {
   };
 
   const handleExpansionTeamBack = () => {
+    // [FIX] 뒤로 가기 시 난이도는 유지하고 팀 선택 화면으로만 이동
+    // 난이도를 초기화하지 않음 (이미 선택된 난이도 유지)
     setScreenView('team_select');
   };
 
   // 로컬 저장소에서 불러오기
   const handleLoadFromLocal = async () => {
     try {
-      const savedData = localStorage.getItem(SAVE_KEY);
+      // [FIX] SafeStorage를 사용하여 스토리지 접근 실패 시 메모리 Fallback 제공
+      const savedData = SafeStorage.getItem(SAVE_KEY);
       if (!savedData) {
         alert('저장된 게임이 없습니다.\n\n새 게임을 시작해주세요.');
         setIsLoadModalOpen(false);
@@ -189,7 +212,8 @@ function AppContent() {
             
             // 파일에서 불러온 데이터를 로컬 스토리지에도 저장
             try {
-              localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+              // [FIX] SafeStorage를 사용하여 스토리지 접근 실패 시 메모리 Fallback 제공
+              SafeStorage.setItem(SAVE_KEY, JSON.stringify(data));
             } catch (syncError) {
               console.error('로컬 저장 오류:', syncError);
               // 로컬 저장 실패해도 게임은 진행 가능 (경고만 표시)
@@ -231,7 +255,8 @@ function AppContent() {
 
   const handleStartNewGame = () => {
     // 저장된 게임 데이터 삭제
-    localStorage.removeItem(SAVE_KEY);
+    // [FIX] SafeStorage를 사용하여 스토리지 접근 실패 시 메모리 Fallback 제공
+    SafeStorage.removeItem(SAVE_KEY);
     
     setShouldLoadGame(false);
     setSelectedTeam(null);

@@ -17,7 +17,13 @@ function MessageBubble({
   isStreaming
 }: MessageBubbleProps) {
   // 파싱된 메시지를 메모이제이션하여 불필요한 재파싱 방지
-  const parsed = useMemo(() => parseAIResponse(message), [message]);
+  const parsed = useMemo(() => {
+    const result = parseAIResponse(message);
+    // 연속된 빈 줄 제거 (3개 이상의 연속된 빈 줄을 2개로 제한)
+    // 정규식: 3개 이상의 연속된 줄바꿈을 2개로 변경
+    result.text = result.text.replace(/\n{3,}/g, '\n\n');
+    return result;
+  }, [message]);
 
   // 사용자 메시지는 최소화된 로그 형태로 표시
   if (isUser) {
@@ -195,9 +201,11 @@ function MessageBubble({
                   <tr className="hover:bg-green-50 transition-colors cursor-default">
                     {React.Children.map(childrenArray, (child, index) => {
                       if (React.isValidElement(child)) {
+                        // [FIX] 타자 표 버그: 인덱스를 명시적으로 전달하여 컬럼 매핑 정확도 향상
                         return React.cloneElement(child as any, { 
                           'data-column-index': index,
-                          'data-batter-table': isBatterTable
+                          'data-batter-table': isBatterTable,
+                          key: `col-${index}` // React key 추가로 렌더링 안정성 향상
                         });
                       }
                       return child;
@@ -249,7 +257,8 @@ function MessageBubble({
                 );
               },
               td: ({ children, ...props }: any) => {
-                const columnIndex = props['data-column-index'] ?? -1;
+                // [FIX] 타자 표 버그: 안전한 인덱스 추출 (undefined 체크 강화)
+                const columnIndex = props['data-column-index'] !== undefined ? props['data-column-index'] : -1;
                 const cellText = typeof children === 'string' ? children : String(children);
                 // 첫 번째 컬럼(구분: 1군/2군) 스타일링
                 const isDivisionColumn = columnIndex === 0 && (cellText.trim() === '1군' || cellText.trim() === '2군');
@@ -307,11 +316,38 @@ function MessageBubble({
                 );
               },
               // 일반 텍스트 스타일
-              p: ({ children }) => (
-                <p className="mb-3 last:mb-0 whitespace-pre-wrap leading-relaxed text-gray-800 break-words text-base sm:text-base md:text-lg">
-                  {children}
-                </p>
-              ),
+              p: ({ children }) => {
+                // 빈 p 태그 (빈 줄) 제거
+                // children이 없거나, 빈 문자열이거나, br만 있는 경우 숨김
+                if (!children) {
+                  return null;
+                }
+                
+                // children을 문자열로 변환하여 확인
+                const childrenArray = React.Children.toArray(children);
+                const textContent = childrenArray
+                  .map(child => {
+                    if (typeof child === 'string') return child;
+                    if (React.isValidElement(child) && child.type === 'br') return '\n';
+                    if (React.isValidElement(child) && child.props?.children) {
+                      return React.Children.toArray(child.props.children).join('');
+                    }
+                    return '';
+                  })
+                  .join('')
+                  .trim();
+                
+                // 빈 내용이거나 br만 있는 경우 숨김
+                if (!textContent || textContent === '\n' || textContent.match(/^[\s\n\r]*$/)) {
+                  return null;
+                }
+                
+                return (
+                  <p className="mb-3 last:mb-0 whitespace-pre-wrap leading-relaxed text-gray-800 break-words text-base sm:text-base md:text-lg">
+                    {children}
+                  </p>
+                );
+              },
               // 코드 블록
               pre: ({ children }) => (
                 <pre className="bg-gray-50 p-3 sm:p-4 rounded text-sm sm:text-base font-mono overflow-x-auto my-3 border border-gray-200 touch-pan-x">

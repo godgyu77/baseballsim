@@ -61,7 +61,10 @@ export interface IStorageStrategy {
 
 /**
  * [NEW] 로컬 스토리지 전략 구현
+ * [FIX] SafeStorage를 사용하여 스토리지 접근 실패 시 메모리 Fallback 제공
  */
+import { SafeStorage, safeSetJSON, safeGetJSON } from '../lib/safeStorage';
+
 export class LocalStorageStrategy implements IStorageStrategy {
   /**
    * [NEW] 데이터 저장
@@ -77,8 +80,8 @@ export class LocalStorageStrategy implements IStorageStrategy {
         },
       };
 
-      localStorage.setItem(key, JSON.stringify(saveData));
-      return true;
+      // [FIX] SafeStorage 사용 (메모리 Fallback 포함)
+      return safeSetJSON(key, saveData);
     } catch (error) {
       console.error('[LocalStorageStrategy] 저장 오류:', error);
       return false;
@@ -90,12 +93,11 @@ export class LocalStorageStrategy implements IStorageStrategy {
    */
   async load(key: string): Promise<GameSaveData | null> {
     try {
-      const savedData = localStorage.getItem(key);
-      if (!savedData) {
+      // [FIX] SafeStorage 사용 (메모리 Fallback 포함)
+      const parsed = safeGetJSON<GameSaveData>(key);
+      if (!parsed) {
         return null;
       }
-
-      const parsed = JSON.parse(savedData);
       
       // [NEW] 기존 데이터 호환성: 메타데이터가 없으면 생성
       if (!parsed.metadata) {
@@ -104,7 +106,7 @@ export class LocalStorageStrategy implements IStorageStrategy {
         };
       }
 
-      return parsed as GameSaveData;
+      return parsed;
     } catch (error) {
       console.error('[LocalStorageStrategy] 로드 오류:', error);
       return null;
@@ -116,12 +118,11 @@ export class LocalStorageStrategy implements IStorageStrategy {
    */
   async getMetadata(key: string): Promise<SaveMetadata | null> {
     try {
-      const savedData = localStorage.getItem(key);
-      if (!savedData) {
+      // [FIX] SafeStorage 사용 (메모리 Fallback 포함)
+      const parsed = safeGetJSON<GameSaveData>(key);
+      if (!parsed) {
         return null;
       }
-
-      const parsed = JSON.parse(savedData);
       
       // [NEW] 메타데이터가 없으면 기본값 반환
       if (!parsed.metadata) {
@@ -142,7 +143,8 @@ export class LocalStorageStrategy implements IStorageStrategy {
    */
   async delete(key: string): Promise<boolean> {
     try {
-      localStorage.removeItem(key);
+      // [FIX] SafeStorage 사용 (메모리 Fallback 포함)
+      SafeStorage.removeItem(key);
       return true;
     } catch (error) {
       console.error('[LocalStorageStrategy] 삭제 오류:', error);
