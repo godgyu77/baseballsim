@@ -587,68 +587,17 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           }
 
           // [Roster-Validation] 로스터 무결성 검사 추가
-          // [ROSTER] 태그에서 로스터 데이터가 있는 경우 검증 및 업데이트
-          if (parsed.roster && Array.isArray(parsed.roster) && parsed.roster.length > 0) {
-            // 초기 로스터 출력 시 InitialData.ts와 비교 검증 (currentRoster가 비어있을 때만)
-            const isInitialRoster = currentRoster.length === 0;
-            // InitialData.ts의 팀 이름 형식과 매칭 (예: "한화 이글스", "KT 위즈" 등)
-            const teamNameForValidation = selectedTeam.fullName; // "한화 이글스", "KT 위즈" 등
-            const initialDataPlayerNames = isInitialRoster 
-              ? extractPlayerNamesFromInitialData(KBO_INITIAL_DATA, teamNameForValidation)
-              : undefined;
-            
-            // 로스터 무결성 검증
-            const validation = validateRosterIntegrity(
-              parsed.roster, 
-              currentRoster,
-              initialDataPlayerNames
-            );
-            
-            if (!validation.isValid) {
-              // [FIX] 로스터 데이터 잘림 감지 및 처리
-              const isTruncated = validation.isTruncated === true;
-              
-              if (isTruncated) {
-                // 로스터 데이터가 잘린 경우: 심각한 오류로 처리
-                console.error('⚠️ [Roster Truncated!] 로스터 데이터가 잘렸습니다. 로스터 업데이트를 건너뜁니다.');
-                console.error('[Roster-Validation] 잘림 감지 사유:');
-                validation.errors.forEach((error, index) => {
-                  console.error(`  ${index + 1}. ${error}`);
-                });
-                
-                // [TODO] 향후 재요청 로직 구현 가능
-                // 예: handleSend("로스터 데이터가 잘렸습니다. 타자진 데이터만 다시 생성해주세요.", { hideFromUI: true });
-                
-                // 기존 로스터 상태 유지 (업데이트 방지)
-              } else {
-                // 다른 검증 실패: 경고 로그 출력 및 기존 로스터 유지 (Fail-Safe)
-                console.error('[Roster-Validation] AI 데이터 오류 감지: 로스터 업데이트를 건너뜁니다.');
-                console.error('[Roster-Validation] 검증 실패 사유:');
-                validation.errors.forEach((error, index) => {
-                  console.error(`  ${index + 1}. ${error}`);
-                });
-                if (validation.warnings.length > 0) {
-                  console.warn('[Roster-Validation] 경고 사항:');
-                  validation.warnings.forEach((warning, index) => {
-                    console.warn(`  ${index + 1}. ${warning}`);
-                  });
-                }
-                // 기존 로스터 상태 유지 (업데이트 방지)
-              }
-            } else {
-              // 검증 성공: 로스터 업데이트
-              if (validation.warnings.length > 0) {
-                console.warn('[Roster-Validation] 경고 사항 (업데이트는 진행):');
-                validation.warnings.forEach((warning, index) => {
-                  console.warn(`  ${index + 1}. ${warning}`);
-                });
-              }
-              // [CRITICAL] AI 응답의 로스터를 무시하고 InitialData.ts에서만 가져오기
-              console.warn(`[Data Integrity] ⚠️ AI 응답의 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
-              const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
-              setCurrentRoster(rosterFromInitialData);
-              console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
-            }
+          // [CRITICAL] AI 응답의 로스터는 완전히 무시
+          // InitialData.ts에서만 로스터를 가져오므로, AI 응답의 parsed.roster는 사용하지 않음
+          // 초기 로스터가 비어있을 때만 InitialData.ts에서 로드
+          if (currentRoster.length === 0) {
+            console.log(`[ChatInterface] 📍 setCurrentRoster 호출 위치: 초기 로스터 로드 (line ~590)`);
+            console.log(`[ChatInterface] 📍 selectedTeam.fullName: "${selectedTeam.fullName}"`);
+            console.log(`[Roster-Validation] 초기 로스터 로드: InitialData.ts에서 직접 가져오기`);
+            const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
+            console.log(`[ChatInterface] 📍 로드된 로스터 선수 수: ${rosterFromInitialData.length}명`);
+            setCurrentRoster(rosterFromInitialData);
+            console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
           }
 
           // GUI_EVENT에서 로스터 데이터가 있는 경우 검증 (향후 확장용)

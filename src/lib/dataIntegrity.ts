@@ -246,20 +246,30 @@ export function getTeamRosterFromInitialDataOnly(teamName: string): TeamRoster |
   // [FIX] 팀 이름 정규화 (한글명/영문명 모두 매칭)
   const normalizedNames = normalizeTeamName(teamName);
   
+  console.log(`[Data Integrity] 🔍 팀 이름 검색: "${teamName}"`);
+  console.log(`[Data Integrity] 🔍 정규화된 검색어:`, normalizedNames);
+  console.log(`[Data Integrity] 🔍 InitialData.ts의 팀 목록:`, allData.map(t => t.team));
+  
   const team = allData.find(t => {
     const teamNameLower = t.team.toLowerCase();
-    return normalizedNames.some(name => {
+    const matched = normalizedNames.some(name => {
       const nameLower = name.toLowerCase();
-      return teamNameLower === nameLower || 
+      const isMatch = teamNameLower === nameLower || 
              teamNameLower.includes(nameLower) || 
              nameLower.includes(teamNameLower);
+      if (isMatch) {
+        console.log(`[Data Integrity] ✅ 매칭 성공: "${t.team}" <-> "${name}"`);
+      }
+      return isMatch;
     });
+    return matched;
   });
 
   if (!team) {
-    console.warn(`[Data Integrity] 팀 "${teamName}"을 InitialData.ts에서 찾을 수 없습니다.`);
-    console.warn(`[Data Integrity] 사용 가능한 팀 목록:`, allData.map(t => t.team));
-    console.warn(`[Data Integrity] 정규화된 검색어:`, normalizedNames);
+    console.error(`[Data Integrity] ❌ 팀 "${teamName}"을 InitialData.ts에서 찾을 수 없습니다.`);
+    console.error(`[Data Integrity] 사용 가능한 팀 목록:`, allData.map(t => t.team));
+    console.error(`[Data Integrity] 정규화된 검색어:`, normalizedNames);
+    console.error(`[Data Integrity] 매칭 실패 - InitialData.ts의 팀 이름 형식과 UI의 팀 이름 형식이 일치하지 않을 수 있습니다.`);
     return null;
   }
 
@@ -283,12 +293,22 @@ export function getTeamRosterFromInitialDataOnly(teamName: string): TeamRoster |
  * AI 응답을 절대 사용하지 않고, InitialData.ts만 사용
  */
 export function getRosterFromInitialDataOnly(teamName: string): Player[] {
+  console.log(`[Data Integrity] 📍 getRosterFromInitialDataOnly() 호출됨 - 팀: "${teamName}"`);
+  console.trace(`[Data Integrity] 📍 호출 스택:`);
+  
   const teamRoster = getTeamRosterFromInitialDataOnly(teamName);
   
   if (!teamRoster) {
     console.error(`[Data Integrity] ❌ 팀 "${teamName}"의 로스터를 InitialData.ts에서 찾을 수 없습니다.`);
+    console.error(`[Data Integrity] ❌ 빈 배열을 반환합니다.`);
     return [];
   }
+
+  console.log(`[Data Integrity] ✅ 팀 "${teamName}" 로스터 찾음:`, {
+    team: teamRoster.team,
+    pitchers: teamRoster.pitchers.length,
+    batters: teamRoster.batters.length,
+  });
 
   const players: Player[] = [];
 
@@ -324,7 +344,19 @@ export function getRosterFromInitialDataOnly(teamName: string): Player[] {
     });
   }
 
-  console.log(`[Data Integrity] ✅ InitialData.ts에서 직접 로스터 로드: ${teamName} - ${players.length}명 (투수 ${teamRoster.pitchers.length}명, 타자 ${teamRoster.batters.length}명)`);
+  // 선수 이름 목록 출력 (디버깅용)
+  const playerNames = players.map(p => p.name);
+  console.log(`[Data Integrity] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${teamName} - ${players.length}명 (투수 ${teamRoster.pitchers.length}명, 타자 ${teamRoster.batters.length}명)`);
+  console.log(`[Data Integrity] 📋 로드된 선수 목록 (처음 10명):`, playerNames.slice(0, 10));
+  
+  // 특정 선수 확인 (디버깅용)
+  const checkPlayers = ['최원태', '이정후', '김민석', '강백호', '고우석', '김혜성'];
+  for (const checkName of checkPlayers) {
+    const found = players.find(p => p.name === checkName);
+    if (found) {
+      console.log(`[Data Integrity] ✅ "${checkName}" 발견: 팀="${teamRoster.team}", 포지션="${found.position}"`);
+    }
+  }
   
   return players;
 }
