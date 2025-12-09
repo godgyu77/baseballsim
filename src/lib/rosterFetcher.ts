@@ -89,6 +89,46 @@ function getAllPlayerNamesFromInitialData(): Set<string> {
 }
 
 /**
+ * [FIX] 팀 이름 정규화 헬퍼 (한글명/영문명 매칭용)
+ */
+function normalizeTeamNameForComparison(teamName: string): string[] {
+  const TEAM_NAME_MAP: Record<string, string[]> = {
+    'KT Wiz': ['KT 위즈', 'KT Wiz', 'kt', 'KT'],
+    'Samsung Lions': ['삼성 라이온즈', 'Samsung Lions', '삼성', 'samsung'],
+    'Hanwha Eagles': ['한화 이글스', 'Hanwha Eagles', '한화', 'hanwha'],
+    'SSG Landers': ['SSG 랜더스', 'SSG Landers', 'SSG', 'ssg'],
+    'Kiwoom Heroes': ['키움 히어로즈', 'Kiwoom Heroes', '키움', 'kiwoom'],
+    'NC Dinos': ['NC 다이노스', 'NC Dinos', 'NC', 'nc'],
+    'LG Twins': ['LG 트윈스', 'LG Twins', 'LG', 'lg'],
+    'Lotte Giants': ['롯데 자이언츠', 'Lotte Giants', '롯데', 'lotte'],
+    'Doosan Bears': ['두산 베어스', 'Doosan Bears', '두산', 'doosan'],
+    'KIA Tigers': ['KIA 타이거즈', 'KIA Tigers', 'KIA', 'kia'],
+  };
+  
+  const normalized: string[] = [teamName];
+  for (const [englishName, aliases] of Object.entries(TEAM_NAME_MAP)) {
+    if (aliases.some(alias => alias.toLowerCase() === teamName.toLowerCase())) {
+      normalized.push(...aliases);
+      normalized.push(englishName);
+      break;
+    }
+  }
+  return normalized;
+}
+
+/**
+ * [FIX] 팀 이름이 같은지 비교 (한글명/영문명 모두 매칭)
+ */
+function isSameTeam(team1: string, team2: string): boolean {
+  const normalized1 = normalizeTeamNameForComparison(team1);
+  const normalized2 = normalizeTeamNameForComparison(team2);
+  
+  return normalized1.some(n1 => 
+    normalized2.some(n2 => n1.toLowerCase() === n2.toLowerCase())
+  );
+}
+
+/**
  * [FIX] 선수 이름으로 올바른 팀 찾기 (잘못된 팀 배치 수정용)
  */
 function findCorrectTeamForPlayer(playerName: string): string | null {
@@ -133,9 +173,9 @@ function parseRosterFromResponse(responseText: string, teamName: string): Player
               return null;
             }
             
-            // [FIX] 잘못된 팀에 배치된 선수 감지
+            // [FIX] 잘못된 팀에 배치된 선수 감지 (한글명/영문명 모두 매칭)
             const correctTeam = findCorrectTeamForPlayer(playerName);
-            if (correctTeam && correctTeam !== teamName) {
+            if (correctTeam && !isSameTeam(correctTeam, teamName)) {
               console.warn(`[RosterFetcher] ⚠️ 잘못된 팀 배치 감지: "${playerName}"는 "${correctTeam}"에 있어야 하는데 "${teamName}"에 배치됨. 제외합니다.`);
               return null;
             }
