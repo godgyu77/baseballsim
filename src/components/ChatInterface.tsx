@@ -30,6 +30,7 @@ import { fetchFullRosterSequentially } from '../lib/rosterFetcher';
 import { getInitialBudget } from '../constants/GameConfig';
 import { Team } from '../constants/TeamData';
 import { KBO_INITIAL_DATA } from '../constants/prompts';
+import { getInitialRosterForTeam, getCompactAllRosters } from '../lib/rosterFormatter';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
 import { createInitialFacilityState, FACILITY_DEFINITIONS } from '../constants/Facilities';
@@ -1317,6 +1318,9 @@ ${facilityInfo}`;
         
         // InitialData를 포함한 전체 프롬프트 생성
         // [FIX] 프롬프트 최상단에 강제 주입하여 AI가 먼저 인식하도록 함
+        // [TOKEN OPTIMIZATION] 신생 구단은 로스터가 없으므로 전체 로스터 요약만 전송
+        const allRostersSummary = getCompactAllRosters();
+        
         const fullPromptWithData = `[SYSTEM STATUS: FIXED]
 - User Selected Team: ${expansionTeamData?.teamName || '신생 구단'} (Confirmed)
 - Difficulty: ${difficultyCode} (${difficultyMode}) (Confirmed)
@@ -1327,7 +1331,7 @@ ${facilityInfo}`;
 🚫 DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or "운영 난이도를 선택해주세요"
 ✅ IMMEDIATELY start the game with <STATUS> and <NEWS> tags.
 
-${KBO_INITIAL_DATA}
+${allRostersSummary}
 
 ${fullPrompt}
 
@@ -1491,8 +1495,10 @@ ${difficultyConfig}
 
 ${facilityInfo}`;
         
-        // [DYNAMIC CONTEXT] 초기화 시에만 InitialData 포함
-        // 이후 요청에서는 InitialData를 제거하고 필요한 데이터만 동적으로 주입
+        // [TOKEN OPTIMIZATION] 초기화 시 선택된 팀의 로스터만 전송 (전체 로스터 제거)
+        // 전체 10개 팀 로스터(33,000자) 대신 선택된 팀만 전송하여 토큰 절감
+        const selectedTeamRoster = getInitialRosterForTeam(selectedTeam.fullName);
+        
         const fullPromptWithData = `[SYSTEM STATUS: FIXED]
 - User Selected Team: ${selectedTeam.fullName} (Confirmed)
 - Difficulty: ${difficultyCode} (${difficultyMode}) (Confirmed)
@@ -1503,7 +1509,7 @@ ${facilityInfo}`;
 🚫 DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or "운영 난이도를 선택해주세요"
 ✅ IMMEDIATELY start the game with <STATUS> and <NEWS> tags.
 
-${KBO_INITIAL_DATA}
+${selectedTeamRoster}
 
 ${fullPrompt}
 

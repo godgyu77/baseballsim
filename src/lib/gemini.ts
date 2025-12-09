@@ -4,6 +4,7 @@ import { Team } from '../constants/TeamData';
 import { Difficulty } from '../constants/GameConfig';
 import { generateInitPromptFromTeam } from './promptGenerator';
 import { retryRequest } from './retryUtils';
+import { getInitialRosterForTeam } from './rosterFormatter';
 
 export const GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -319,8 +320,11 @@ export async function initializeGameWithData(
   // 초기 시설 레벨은 모두 1로 시작
   const initPromptText = generateInitPromptFromTeam(selectedTeam, difficulty);
   
-  // Initial Data와 프롬프트 결합
-  const initPrompt = `${KBO_INITIAL_DATA}
+  // [TOKEN OPTIMIZATION] 선택된 팀의 로스터만 전송 (전체 로스터 제거)
+  const selectedTeamRoster = getInitialRosterForTeam(selectedTeam.fullName);
+  
+  // Initial Data와 프롬프트 결합 (선택된 팀만)
+  const initPrompt = `${selectedTeamRoster}
 
 ${initPromptText}
 

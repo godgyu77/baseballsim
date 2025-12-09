@@ -148,8 +148,8 @@ export function getRelevantContext(
       return '';
 
     case 'draft_preparation':
-      // 드래프트 준비: 보호선수 + 드래프트 풀 (필요시 구현)
-      return '[CONTEXT: Draft] 드래프트 관련 데이터는 별도로 요청하세요.';
+      // 드래프트 준비: 최소 데이터만
+      return '[DRAFT]';
 
     case 'facility_management':
       // 시설 관리: 시설 정보만
@@ -159,8 +159,8 @@ export function getRelevantContext(
       return '';
 
     case 'news_generation':
-      // 뉴스 생성: 최소 데이터
-      return '[CONTEXT: News] 뉴스 생성에 필요한 최소 데이터만 사용하세요.';
+      // 뉴스 생성: 컨텍스트 불필요
+      return '';
 
     case 'general':
     default:
@@ -174,23 +174,27 @@ export function getRelevantContext(
  */
 function formatRosterContext(roster: Player[], type: 'my_team' | 'lineup' | 'trade_candidates'): string {
   if (roster.length === 0) {
-    return '[CONTEXT: Empty Roster] 로스터가 비어있습니다.';
+    return '[CONTEXT: Empty Roster]';
   }
 
-  const lines: string[] = [];
-  lines.push(`[CONTEXT: ${type === 'my_team' ? 'My Team Roster' : type === 'lineup' ? 'Lineup Candidates' : 'Trade Candidates'}]`);
-  lines.push(`총 ${roster.length}명의 선수:`);
-  lines.push('');
+  // [TOKEN OPTIMIZATION] 최대 20명만 전송 (토큰 절감)
+  const maxPlayers = 20;
+  const displayRoster = roster.slice(0, maxPlayers);
+  const hasMore = roster.length > maxPlayers;
 
-  // 선수를 간결하게 포맷팅 (이름, 포지션, 주요 스탯만)
-  roster.forEach((player, index) => {
+  const lines: string[] = [];
+  lines.push(`[ROSTER:${type}]${roster.length}명${hasMore ? `(상위${maxPlayers}명만 표시)` : ''}`);
+  
+  // 간결한 CSV 형식으로 압축 (토큰 절감)
+  displayRoster.forEach((player) => {
     const stats = player.stats;
-    const statSummary = stats
-      ? `[${getStatSummary(stats)}]`
-      : '';
-    
-    lines.push(`${index + 1}. ${player.name} (${player.position || 'N/A'}) ${statSummary}`);
+    const statSummary = stats ? getStatSummary(stats) : '';
+    lines.push(`${player.name},${player.position || 'N/A'},${player.age || 'N/A'},${statSummary}`);
   });
+
+  if (hasMore) {
+    lines.push(`...외 ${roster.length - maxPlayers}명`);
+  }
 
   return lines.join('\n');
 }
@@ -199,25 +203,18 @@ function formatRosterContext(roster: Player[], type: 'my_team' | 'lineup' | 'tra
  * 선수 정보를 포맷팅
  */
 function formatPlayerContext(player: Player): string {
-  const lines: string[] = [];
-  lines.push('[CONTEXT: Player Info]');
-  lines.push(`이름: ${player.name}`);
-  lines.push(`포지션: ${player.position || 'N/A'}`);
-  lines.push(`나이: ${player.age || 'N/A'}`);
+  // [TOKEN OPTIMIZATION] 간결한 CSV 형식으로 압축
+  const parts: string[] = [player.name, player.position || 'N/A', `${player.age || 'N/A'}세`];
   
   if (player.stats) {
-    lines.push(`스탯: ${getStatSummary(player.stats)}`);
+    parts.push(getStatSummary(player.stats));
   }
   
   if (player.salary) {
-    lines.push(`연봉: ${player.salary.toFixed(1)}억 원`);
-  }
-  
-  if (player.record) {
-    lines.push(`기록: ${player.record}`);
+    parts.push(`${player.salary.toFixed(1)}억`);
   }
 
-  return lines.join('\n');
+  return `[PLAYER]${parts.join(',')}`;
 }
 
 /**
@@ -251,44 +248,30 @@ function getStatSummary(stats: Player['stats']): string {
  * 리그 순위표 포맷팅
  */
 function formatLeagueStandings(standings: any): string {
-  const lines: string[] = [];
-  lines.push('[CONTEXT: League Standings]');
-  
-  // 간결한 순위표만 제공
+  // [TOKEN OPTIMIZATION] 상위 5팀만 CSV 형식으로 압축
   if (typeof standings === 'object') {
-    const teams = Object.keys(standings).slice(0, 10); // 상위 10팀만
-    teams.forEach((team, index) => {
-      const record = standings[team];
-      if (record) {
-        lines.push(`${index + 1}. ${team}: ${record.wins}승 ${record.losses}패`);
-      }
-    });
+    const top5 = Object.entries(standings)
+      .sort((a, b) => ((b[1] as any).winRate || 0) - ((a[1] as any).winRate || 0))
+      .slice(0, 5);
+    const summary = top5.map(([team, data]: [string, any], idx) => 
+      `${idx + 1}.${team}:${data.wins || 0}승${data.losses || 0}패`
+    ).join(',');
+    return `[STANDINGS]${summary}`;
   }
-
-  return lines.length > 1 ? lines.join('\n') : '';
+  return '';
 }
 
 /**
  * 시설 정보 포맷팅
  */
 function formatFacilitiesContext(facilities: any): string {
-  const lines: string[] = [];
-  lines.push('[CONTEXT: Facilities]');
-  
-  if (facilities.training) {
-    lines.push(`훈련장: Lv.${facilities.training.level || 1}`);
-  }
-  if (facilities.medical) {
-    lines.push(`메디컬: Lv.${facilities.medical.level || 1}`);
-  }
-  if (facilities.marketing) {
-    lines.push(`마케팅: Lv.${facilities.marketing.level || 1}`);
-  }
-  if (facilities.scouting) {
-    lines.push(`스카우트: Lv.${facilities.scouting.level || 1}`);
-  }
-
-  return lines.join('\n');
+  // [TOKEN OPTIMIZATION] CSV 형식으로 압축
+  const levels: string[] = [];
+  if (facilities.training) levels.push(`T:${facilities.training.level || 1}`);
+  if (facilities.medical) levels.push(`M:${facilities.medical.level || 1}`);
+  if (facilities.marketing) levels.push(`MK:${facilities.marketing.level || 1}`);
+  if (facilities.scouting) levels.push(`S:${facilities.scouting.level || 1}`);
+  return levels.length > 0 ? `[FACILITIES]${levels.join(',')}` : '';
 }
 
 /**
