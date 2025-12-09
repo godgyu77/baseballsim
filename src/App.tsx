@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import ApiKeyModal from './components/ApiKeyModal';
 import StartScreen from './components/StartScreen';
@@ -20,6 +20,15 @@ type ScreenView = 'start' | 'difficulty_select' | 'team_select' | 'expansion_for
 
 // [NEW] 내부 App 컴포넌트
 function AppContent() {
+  // [FIX] 앱 시작 시 캐시 검증 (구버전 데이터 방지)
+  useEffect(() => {
+    import('./lib/cacheManager').then(({ initializeCacheValidation }) => {
+      initializeCacheValidation();
+    }).catch((error) => {
+      console.error('[App] 캐시 검증 모듈 로드 실패:', error);
+    });
+  }, []);
+  
   const [apiKey, setApiKey] = useState<string>('');
   const [showApiKeyModal, setShowApiKeyModal] = useState(true);
   const [screenView, setScreenView] = useState<ScreenView>('start');

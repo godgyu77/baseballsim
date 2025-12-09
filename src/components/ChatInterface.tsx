@@ -1246,6 +1246,31 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       isInitializingRef.current = true;
       console.log('[ChatInterface] 게임 초기화 시작 (중복 실행 방지 플래그 설정)');
       
+      // [FIX] 데이터 무결성 검증 (InitialData.ts가 유일한 데이터 소스임을 보장)
+      import('../lib/dataIntegrity').then(({ validateInitialDataIntegrity, validateTeamRosterIntegrity }) => {
+        const globalValidation = validateInitialDataIntegrity();
+        if (!globalValidation.isValid) {
+          console.error('[ChatInterface] ❌ 데이터 무결성 검증 실패:', globalValidation.errors);
+          alert(`데이터 무결성 검증 실패:\n${globalValidation.errors.join('\n')}\n\n게임을 시작할 수 없습니다.`);
+          isInitializingRef.current = false;
+          hasInitializedRef.current = true;
+          return;
+        }
+        
+        const teamValidation = validateTeamRosterIntegrity(selectedTeam.fullName);
+        if (!teamValidation.isValid) {
+          console.error(`[ChatInterface] ❌ 팀 "${selectedTeam.fullName}" 데이터 검증 실패:`, teamValidation.errors);
+          alert(`팀 데이터 검증 실패:\n${teamValidation.errors.join('\n')}\n\n게임을 시작할 수 없습니다.`);
+          isInitializingRef.current = false;
+          hasInitializedRef.current = true;
+          return;
+        }
+        
+        console.log(`[ChatInterface] ✅ 데이터 무결성 검증 완료: 팀 "${selectedTeam.fullName}"`);
+      }).catch((error) => {
+        console.error('[ChatInterface] 데이터 무결성 검증 모듈 로드 실패:', error);
+      });
+      
       // [CRITICAL FIX] 이전 메시지 및 채팅 인스턴스 완전 초기화
       // 화면에 표시된 모든 메시지와 AI 응답을 제거하여 API 오류 방지
       setMessages([]);

@@ -1,21 +1,22 @@
 /**
  * 로스터 데이터를 최적화된 프롬프트 형식으로 변환
  * 토큰 절감을 위해 간결한 형식 사용
+ * [FIX] InitialData.ts를 유일한 데이터 소스로 강제
  */
 
-import { ROSTER_DATA, type TeamRoster } from '../constants/prompts/InitialData';
+import { type TeamRoster } from '../constants/prompts/InitialData';
+import { getTeamRosterFromInitialDataOnly, getInitialDataOnly } from './dataIntegrity';
 
 /**
  * 특정 팀의 로스터만 간결한 형식으로 반환 (토큰 절감)
+ * [FIX] Force load from InitialData only
  */
 export function getCompactTeamRoster(teamName: string): string {
-  const team = ROSTER_DATA.find(t => 
-    t.team === teamName || 
-    t.team.includes(teamName) ||
-    teamName.includes(t.team)
-  );
+  // [FIX] InitialData.ts에서만 데이터 로드 (데이터 소스 오염 방지)
+  const team = getTeamRosterFromInitialDataOnly(teamName);
   
   if (!team) {
+    console.error(`[RosterFormatter] 팀 "${teamName}"의 데이터를 InitialData.ts에서 찾을 수 없습니다.`);
     return `[ROSTER: ${teamName}] 로스터 데이터를 찾을 수 없습니다.`;
   }
   
@@ -67,15 +68,19 @@ export function getCompactTeamRoster(teamName: string): string {
 
 /**
  * 모든 팀의 로스터를 간결한 요약 형식으로 반환 (최소한의 정보만)
+ * [FIX] Force load from InitialData only
  */
 export function getCompactAllRosters(): string {
+  // [FIX] InitialData.ts에서만 데이터 로드 (데이터 소스 오염 방지)
+  const rosterData = getInitialDataOnly();
+  
   const lines: string[] = [];
   lines.push('# [ROSTER SUMMARY] 2026 Season');
   lines.push('**주의:** 전체 로스터는 코드에서 관리됩니다. 필요시 특정 팀을 요청하세요.');
   lines.push('');
   lines.push('## 팀별 선수 수 요약');
   
-  for (const team of ROSTER_DATA) {
+  for (const team of rosterData) {
     const pitcherCount = team.pitchers.length;
     const batterCount = team.batters.length;
     lines.push(`- ${team.team}: 투수 ${pitcherCount}명, 타자 ${batterCount}명`);

@@ -5,6 +5,7 @@ import { Difficulty } from '../constants/GameConfig';
 import { generateInitPromptFromTeam } from './promptGenerator';
 import { retryRequest } from './retryUtils';
 import { getInitialRosterForTeam } from './rosterFormatter';
+import { validateInitialDataIntegrity, validateTeamRosterIntegrity } from './dataIntegrity';
 
 export const GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -294,6 +295,31 @@ export async function initializeGameWithData(
   // history 인자는 받더라도 무시합니다. (API 에러 방지용)
   _ignoredHistory: any[] = []
 ): Promise<string> {
+  // [FIX] 데이터 무결성 검증 - InitialData.ts가 유일한 데이터 소스임을 보장
+  
+  // 전체 데이터 검증
+  const globalValidation = validateInitialDataIntegrity();
+  if (!globalValidation.isValid) {
+    console.error('[Data Integrity] ❌ 초기 데이터 무결성 검증 실패:', globalValidation.errors);
+    throw new Error(`데이터 무결성 검증 실패: ${globalValidation.errors.join(', ')}`);
+  }
+  
+  if (globalValidation.warnings.length > 0) {
+    console.warn('[Data Integrity] ⚠️ 초기 데이터 무결성 경고:', globalValidation.warnings);
+  }
+  
+  // 선택된 팀의 데이터 검증
+  const teamValidation = validateTeamRosterIntegrity(selectedTeam.fullName);
+  if (!teamValidation.isValid) {
+    console.error(`[Data Integrity] ❌ 팀 "${selectedTeam.fullName}" 데이터 검증 실패:`, teamValidation.errors);
+    throw new Error(`팀 데이터 검증 실패: ${teamValidation.errors.join(', ')}`);
+  }
+  
+  console.log(`[Data Integrity] ✅ 팀 "${selectedTeam.fullName}" 데이터 검증 완료:`, {
+    expected: teamValidation.expectedSize,
+    loaded: teamValidation.loadedSize,
+  });
+  
   // 안전 장치: 데이터 길이 확인
   console.log("Data Length:", KBO_INITIAL_DATA.length);
   
