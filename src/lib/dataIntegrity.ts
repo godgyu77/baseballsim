@@ -277,3 +277,68 @@ export function getTeamRosterFromInitialDataOnly(teamName: string): TeamRoster |
   return team;
 }
 
+/**
+ * [FIX] 로스터 필터링 함수 - InitialData.ts 기반 엄격한 검증
+ * 유령 선수 제거 및 잘못된 팀 배치 수정
+ */
+export function filterRosterByInitialData(
+  roster: Player[],
+  currentTeamName: string
+): Player[] {
+  if (!roster || roster.length === 0) {
+    return [];
+  }
+
+  // InitialData.ts에서 모든 선수 이름 가져오기
+  const validPlayerNames = new Set<string>();
+  const playerTeamMap = new Map<string, string>(); // 선수 이름 -> 올바른 팀 이름
+  
+  for (const team of ROSTER_DATA) {
+    for (const pitcher of team.pitchers) {
+      validPlayerNames.add(pitcher.name);
+      playerTeamMap.set(pitcher.name, team.team);
+    }
+    for (const batter of team.batters) {
+      validPlayerNames.add(batter.name);
+      playerTeamMap.set(batter.name, team.team);
+    }
+  }
+
+  // 팀 이름 정규화 헬퍼
+  function isSameTeam(team1: string, team2: string): boolean {
+    const normalized1 = normalizeTeamName(team1);
+    const normalized2 = normalizeTeamName(team2);
+    
+    return normalized1.some(n1 => 
+      normalized2.some(n2 => n1.toLowerCase() === n2.toLowerCase())
+    );
+  }
+
+  const filtered = roster
+    .map((player) => {
+      const playerName = player.name || '';
+      
+      // 1. InitialData.ts에 없는 선수는 제외 (고우석, 김혜성 등)
+      if (!validPlayerNames.has(playerName)) {
+        console.warn(`[Data Integrity] ⚠️ 유령 선수 감지 및 제외: "${playerName}" (InitialData.ts에 없음)`);
+        return null;
+      }
+      
+      // 2. 잘못된 팀에 배치된 선수 감지 (강백호가 KT에 있으면 제거)
+      const correctTeam = playerTeamMap.get(playerName);
+      if (correctTeam && !isSameTeam(correctTeam, currentTeamName)) {
+        console.warn(`[Data Integrity] ⚠️ 잘못된 팀 배치 감지: "${playerName}"는 "${correctTeam}"에 있어야 하는데 "${currentTeamName}"에 배치됨. 제외합니다.`);
+        return null;
+      }
+      
+      return player;
+    })
+    .filter((p): p is Player => p !== null);
+
+  if (filtered.length < roster.length) {
+    console.warn(`[Data Integrity] ⚠️ ${roster.length - filtered.length}명의 유령/잘못 배치된 선수가 필터링되었습니다.`);
+  }
+
+  return filtered;
+}
+

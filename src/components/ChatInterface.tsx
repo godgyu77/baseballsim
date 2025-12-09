@@ -31,6 +31,7 @@ import { getInitialBudget } from '../constants/GameConfig';
 import { Team } from '../constants/TeamData';
 import { KBO_INITIAL_DATA } from '../constants/prompts';
 import { getInitialRosterForTeam, getCompactAllRosters } from '../lib/rosterFormatter';
+import { filterRosterByInitialData } from '../lib/dataIntegrity';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
 import { createInitialFacilityState, FACILITY_DEFINITIONS } from '../constants/Facilities';
@@ -642,8 +643,10 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                   console.warn(`  ${index + 1}. ${warning}`);
                 });
               }
-              setCurrentRoster(parsed.roster);
-              console.log(`[Roster-Validation] ✅ 로스터 업데이트 완료: ${parsed.roster.length}명`);
+              // [FIX] InitialData.ts 기반 엄격한 필터링 적용
+              const filteredRoster = filterRosterByInitialData(parsed.roster, selectedTeam.fullName);
+              setCurrentRoster(filteredRoster);
+              console.log(`[Roster-Validation] ✅ 로스터 업데이트 완료: ${filteredRoster.length}명 (필터링 전: ${parsed.roster.length}명)`);
             }
           }
 
@@ -1094,7 +1097,10 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                 }
                 // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
                 if (parsed.currentRoster && Array.isArray(parsed.currentRoster)) {
-                  setCurrentRoster(parsed.currentRoster);
+                  // [FIX] InitialData.ts 기반 엄격한 필터링 적용
+                  const filteredRoster = filterRosterByInitialData(parsed.currentRoster, selectedTeam.fullName);
+                  setCurrentRoster(filteredRoster);
+                  console.log(`[Roster-Validation] ✅ 로스터 복원 완료: ${filteredRoster.length}명 (필터링 전: ${parsed.currentRoster.length}명)`);
                 }
                 // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
                 if (parsed.leagueStandings && typeof parsed.leagueStandings === 'object') {
@@ -2114,7 +2120,10 @@ ${definition.effect(result.newLevel).description}
             }
             // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
             if (data.currentRoster && Array.isArray(data.currentRoster)) {
-              setCurrentRoster(data.currentRoster);
+              // [FIX] InitialData.ts 기반 엄격한 필터링 적용
+              const filteredRoster = filterRosterByInitialData(data.currentRoster, selectedTeam.fullName);
+              setCurrentRoster(filteredRoster);
+              console.log(`[Roster-Validation] ✅ 로스터 복원 완료: ${filteredRoster.length}명 (필터링 전: ${data.currentRoster.length}명)`);
             }
             // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
             if (data.leagueStandings && typeof data.leagueStandings === 'object') {
@@ -2239,7 +2248,10 @@ ${definition.effect(result.newLevel).description}
       }
       // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
       if (data.currentRoster && Array.isArray(data.currentRoster)) {
-        setCurrentRoster(data.currentRoster);
+        // [FIX] InitialData.ts 기반 엄격한 필터링 적용
+        const filteredRoster = filterRosterByInitialData(data.currentRoster, selectedTeam.fullName);
+        setCurrentRoster(filteredRoster);
+        console.log(`[Roster-Validation] ✅ 로스터 복원 완료: ${filteredRoster.length}명 (필터링 전: ${data.currentRoster.length}명)`);
       }
       // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
       if (data.leagueStandings && typeof data.leagueStandings === 'object') {
@@ -2455,7 +2467,10 @@ ${definition.effect(result.newLevel).description}
       }
       // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
       if (parsed.currentRoster && Array.isArray(parsed.currentRoster)) {
-        setCurrentRoster(parsed.currentRoster);
+        // [FIX] InitialData.ts 기반 엄격한 필터링 적용
+        const filteredRoster = filterRosterByInitialData(parsed.currentRoster, selectedTeam.fullName);
+        setCurrentRoster(filteredRoster);
+        console.log(`[Roster-Validation] ✅ 로스터 복원 완료: ${filteredRoster.length}명 (필터링 전: ${parsed.currentRoster.length}명)`);
       }
       // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
       if (parsed.leagueStandings && typeof parsed.leagueStandings === 'object') {
