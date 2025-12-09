@@ -28,7 +28,7 @@ export default function DifficultyModal({ isOpen, onSelect }: DifficultyModalPro
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4"
           >
-            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border-2 border-baseball-green/30 overflow-hidden">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border-2 border-baseball-green/30 overflow-hidden max-h-[90vh] overflow-y-auto">
               {/* Header */}
               <div className="bg-gradient-to-r from-baseball-green to-[#0a3528] px-6 py-5 rounded-t-2xl">
                 <h2 className="text-2xl sm:text-3xl font-bold text-white text-center mb-2">
@@ -41,13 +41,14 @@ export default function DifficultyModal({ isOpen, onSelect }: DifficultyModalPro
 
               {/* Content */}
               <div className="p-4 sm:p-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                {/* 모바일: 가로 스크롤, PC: 그리드 레이아웃 */}
+                <div className="flex sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 overflow-x-auto sm:overflow-x-visible pb-2 -mx-4 sm:-mx-0 px-4 sm:px-0 scrollbar-thin scrollbar-thumb-baseball-green/30 scrollbar-track-transparent">
                   {/* 이지 모드 */}
                   <motion.button
                     whileHover={{ scale: 1.02, y: -2 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => onSelect('EASY')}
-                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl hover:border-green-500 transition-all text-left touch-manipulation"
+                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl hover:border-green-500 transition-all text-left touch-manipulation flex-shrink-0 w-[280px] sm:w-[300px] md:w-[320px]"
                   >
                     <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
                       <div className="p-1.5 sm:p-2 bg-green-500 rounded-lg">
@@ -91,7 +92,7 @@ export default function DifficultyModal({ isOpen, onSelect }: DifficultyModalPro
                     whileHover={{ scale: 1.02, y: -2 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => onSelect('NORMAL')}
-                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-blue-50 to-cyan-50 border-2 border-blue-300 rounded-xl hover:border-blue-500 transition-all text-left touch-manipulation"
+                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-blue-50 to-cyan-50 border-2 border-blue-300 rounded-xl hover:border-blue-500 transition-all text-left touch-manipulation flex-shrink-0 w-[280px] sm:w-[300px] md:w-[320px]"
                   >
                     <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
                       <div className="p-1.5 sm:p-2 bg-blue-500 rounded-lg">
@@ -135,7 +136,7 @@ export default function DifficultyModal({ isOpen, onSelect }: DifficultyModalPro
                     whileHover={{ scale: 1.02, y: -2 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => onSelect('HARD')}
-                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-orange-50 to-amber-50 border-2 border-orange-300 rounded-xl hover:border-orange-500 transition-all text-left touch-manipulation"
+                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-orange-50 to-amber-50 border-2 border-orange-300 rounded-xl hover:border-orange-500 transition-all text-left touch-manipulation flex-shrink-0 w-[280px] sm:w-[300px] md:w-[320px]"
                   >
                     <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
                       <div className="p-1.5 sm:p-2 bg-orange-500 rounded-lg">
@@ -179,7 +180,7 @@ export default function DifficultyModal({ isOpen, onSelect }: DifficultyModalPro
                     whileHover={{ scale: 1.02, y: -2 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => onSelect('HELL')}
-                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-300 rounded-xl hover:border-red-500 transition-all text-left touch-manipulation"
+                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-300 rounded-xl hover:border-red-500 transition-all text-left touch-manipulation flex-shrink-0 w-[280px] sm:w-[300px] md:w-[320px]"
                   >
                     <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
                       <div className="p-1.5 sm:p-2 bg-red-600 rounded-lg">

@@ -2669,12 +2669,12 @@ ${definition.effect(result.newLevel).description}
       </div>
 
       {/* 푸터 - 입력 영역 */}
-      <div className="flex-none border-t-2 border-baseball-green/20 bg-gradient-to-b from-gray-50 to-white shadow-2xl z-40 pb-[env(safe-area-inset-bottom)] mobile-input-container">
+      <div className="flex-none border-t-2 border-baseball-green/20 bg-gradient-to-b from-gray-50 to-white shadow-2xl z-40 pb-[env(safe-area-inset-bottom)] mobile-input-container safe-area-bottom">
         {/* 선택지 버튼 패널 제거됨 - 모달로 대체 */}
 
         {/* 입력 폼 */}
         <form onSubmit={handleSubmit} className="p-2 sm:p-3 md:p-4">
-          <div className="flex gap-2 sm:gap-3 max-w-5xl mx-auto">
+          <div className="flex gap-2 sm:gap-3 max-w-5xl mx-auto items-center">
             {/* 지시사항, 뉴스 및 시설 관리 버튼 */}
             <div className="flex items-center gap-1 sm:gap-1.5 border-r border-baseball-green/20 pr-1.5 sm:pr-2 md:pr-3 flex-shrink-0">
               <button
@@ -2719,7 +2719,7 @@ ${definition.effect(result.newLevel).description}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="명령을 입력하세요..."
-              className="flex-1 px-3 sm:px-4 md:px-5 py-3 sm:py-3.5 text-base sm:text-base border-2 border-baseball-green/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green/50 focus:border-baseball-green disabled:bg-gray-100 font-sans shadow-sm focus:shadow-md transition-all touch-manipulation min-h-[44px] mobile-input"
+              className="flex-1 px-3 sm:px-4 md:px-5 py-3 sm:py-3.5 text-base sm:text-base border-2 border-baseball-green/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green/50 focus:border-baseball-green disabled:bg-gray-100 font-sans shadow-sm focus:shadow-md transition-all touch-manipulation min-h-[44px] mobile-input min-w-0"
               disabled={isLoading}
               autoComplete="off"
               autoCorrect="off"
