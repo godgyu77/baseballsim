@@ -6,6 +6,41 @@
 import { ROSTER_DATA, type TeamRoster } from '../constants/prompts/InitialData';
 
 /**
+ * [FIX] 팀 이름 매핑 테이블 (한글명 <-> 영문명)
+ * InitialData.ts는 영문명으로 저장되지만, UI에서는 한글명을 사용
+ */
+const TEAM_NAME_MAP: Record<string, string[]> = {
+  'KT Wiz': ['KT 위즈', 'KT Wiz', 'kt', 'KT'],
+  'Samsung Lions': ['삼성 라이온즈', 'Samsung Lions', '삼성', 'samsung'],
+  'Hanwha Eagles': ['한화 이글스', 'Hanwha Eagles', '한화', 'hanwha'],
+  'SSG Landers': ['SSG 랜더스', 'SSG Landers', 'SSG', 'ssg'],
+  'Kiwoom Heroes': ['키움 히어로즈', 'Kiwoom Heroes', '키움', 'kiwoom'],
+  'NC Dinos': ['NC 다이노스', 'NC Dinos', 'NC', 'nc'],
+  'LG Twins': ['LG 트윈스', 'LG Twins', 'LG', 'lg'],
+  'Lotte Giants': ['롯데 자이언츠', 'Lotte Giants', '롯데', 'lotte'],
+  'Doosan Bears': ['두산 베어스', 'Doosan Bears', '두산', 'doosan'],
+  'KIA Tigers': ['KIA 타이거즈', 'KIA Tigers', 'KIA', 'kia'],
+};
+
+/**
+ * [FIX] 팀 이름 정규화 (한글명/영문명 모두 매칭 가능하도록)
+ */
+function normalizeTeamName(teamName: string): string[] {
+  const normalized: string[] = [teamName];
+  
+  // 매핑 테이블에서 찾기
+  for (const [englishName, aliases] of Object.entries(TEAM_NAME_MAP)) {
+    if (aliases.some(alias => alias.toLowerCase() === teamName.toLowerCase())) {
+      normalized.push(...aliases);
+      normalized.push(englishName);
+      break;
+    }
+  }
+  
+  return normalized;
+}
+
+/**
  * [FIX] InitialData.ts에서 로드된 데이터 검증
  * 데이터 소스 오염 방지를 위한 엄격한 검증
  */
@@ -94,13 +129,22 @@ export function validateTeamRosterIntegrity(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  // InitialData.ts에서 해당 팀 찾기
-  const expectedTeam = ROSTER_DATA.find(
-    t => t.team === teamName || t.team.includes(teamName) || teamName.includes(t.team)
-  );
+  // [FIX] InitialData.ts에서 해당 팀 찾기 (한글명/영문명 모두 매칭)
+  const normalizedNames = normalizeTeamName(teamName);
+  const expectedTeam = ROSTER_DATA.find(t => {
+    const teamNameLower = t.team.toLowerCase();
+    return normalizedNames.some(name => {
+      const nameLower = name.toLowerCase();
+      return teamNameLower === nameLower || 
+             teamNameLower.includes(nameLower) || 
+             nameLower.includes(teamNameLower);
+    });
+  });
 
   if (!expectedTeam) {
     errors.push(`팀 "${teamName}"의 데이터가 InitialData.ts에 없습니다.`);
+    console.warn(`[Data Integrity] 사용 가능한 팀 목록:`, ROSTER_DATA.map(t => t.team));
+    console.warn(`[Data Integrity] 정규화된 검색어:`, normalizedNames);
     return {
       isValid: false,
       errors,
@@ -197,12 +241,24 @@ export function getInitialDataOnly(): TeamRoster[] {
  */
 export function getTeamRosterFromInitialDataOnly(teamName: string): TeamRoster | null {
   const allData = getInitialDataOnly();
-  const team = allData.find(
-    t => t.team === teamName || t.team.includes(teamName) || teamName.includes(t.team)
-  );
+  
+  // [FIX] 팀 이름 정규화 (한글명/영문명 모두 매칭)
+  const normalizedNames = normalizeTeamName(teamName);
+  
+  const team = allData.find(t => {
+    const teamNameLower = t.team.toLowerCase();
+    return normalizedNames.some(name => {
+      const nameLower = name.toLowerCase();
+      return teamNameLower === nameLower || 
+             teamNameLower.includes(nameLower) || 
+             nameLower.includes(teamNameLower);
+    });
+  });
 
   if (!team) {
     console.warn(`[Data Integrity] 팀 "${teamName}"을 InitialData.ts에서 찾을 수 없습니다.`);
+    console.warn(`[Data Integrity] 사용 가능한 팀 목록:`, allData.map(t => t.team));
+    console.warn(`[Data Integrity] 정규화된 검색어:`, normalizedNames);
     return null;
   }
 

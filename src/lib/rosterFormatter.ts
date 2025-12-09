@@ -17,6 +17,7 @@ export function getCompactTeamRoster(teamName: string): string {
   
   if (!team) {
     console.error(`[RosterFormatter] 팀 "${teamName}"의 데이터를 InitialData.ts에서 찾을 수 없습니다.`);
+    // [FIX] getTeamRosterFromInitialDataOnly 내부에서 이미 디버깅 정보를 출력함
     return `[ROSTER: ${teamName}] 로스터 데이터를 찾을 수 없습니다.`;
   }
   

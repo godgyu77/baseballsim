@@ -3,6 +3,8 @@
  * 개발 단계에서 구버전 데이터 캐시를 강제로 클리어
  */
 
+import { SafeStorage } from './safeStorage';
+
 const CACHE_VERSION_KEY = 'baseball_game_cache_version';
 const CURRENT_CACHE_VERSION = '2026.1.0'; // InitialData.ts 버전과 동기화
 
@@ -15,7 +17,6 @@ export function clearStaleCache(): {
   reason?: string;
 } {
   try {
-    const { SafeStorage } = require('./safeStorage');
     
     const savedVersion = SafeStorage.getItem(CACHE_VERSION_KEY);
     
@@ -50,7 +51,6 @@ export function clearStaleCache(): {
  */
 export function forceClearAllCache(): void {
   try {
-    const { SafeStorage } = require('./safeStorage');
     
     // 게임 저장 데이터 제외하고 다른 캐시 클리어
     // (필요시 모든 캐시를 클리어하도록 확장 가능)
