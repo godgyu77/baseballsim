@@ -1,45 +1,7 @@
-// Initial Data Prompts
-// [DEPRECATED] 이 문자열은 하위 호환성을 위해 유지됩니다.
-// 새로운 구조화된 데이터는 parseRosterFromCSV()를 사용하여 ROSTER_DATA에서 가져오세요.
 import { parseRosterFromCSV, type TeamRoster } from '../../data/RosterData';
 
-// 원본 CSV 데이터 (하위 호환성 유지)
-const KBO_INITIAL_DATA_CSV = `# [INITIAL_DATA_PACK] 2026 Season Roster
-
-아래 데이터를 기반으로 게임을 초기화하십시오. 이 데이터는 '6. Initial Data' 섹션으로 간주됩니다.
-
-**[데이터 해석 가이드]**
-1. **주의:** 2026년 첫 시즌 시작은 아래 로스터 인원들로만 한정됩니다. 추가 선수 생성 금지.
-2. **연봉:** **0.1억 단위**로 표기합니다.
-3. **능력치 기준 (20-80 Scale):**
-   * **80 (Elite):** 리그 최정상
-   * **60~70 (All-Star):** 1군 상위권
-   * **50 (Average):** 1군 주전 평균
-   * **40 (Backup):** 1.5군 ~ 백업
-   * **20~30 (MiLB):** 2군 ~ 유망주
-
----
-
-# [INITIAL_DATA_PACK] 2026 Season Roster
-
-아래 데이터를 기반으로 게임을 초기화하십시오. 이 데이터는 '6. Initial Data' 섹션으로 간주됩니다.
-
-**[데이터 해석 가이드]**
-1. **주의:** 2026년 첫 시즌 시작은 아래 로스터 인원들로만 한정됩니다. 추가 선수 생성 금지.
-2. **연봉:** **0.1억 단위**로 표기합니다.
-3. **능력치 기준 (20-80 Scale):**
-   * **80 (Elite):** 리그 최정상
-   * **60~70 (All-Star):** 1군 상위권
-   * **50 (Average):** 1군 주전 평균
-   * **40 (Backup):** 1.5군 ~ 백업
-   * **20~30 (MiLB):** 2군 ~ 유망주
-
----
-
-### **1. KT 위즈 (KT Wiz)**
-
-#### **[투수진]**
-POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
+const KBO_INITIAL_DATA_CSV = `#KT
+P,NM,H,V,S,M,C,ST,N
 선발,고영표 (35),우사,136-140,55,55,75,65,25시즌 10승 / G 25 /  W 10 /  L 7 /  ERA 3.85  / 150.0 IP /  110 K
 선발,소형준 (25),우투,144-149,65,60,60,65,부상완전복귀 / G 26 /  W 12 /  L 5 /  ERA 3.10  / 160.0 IP /  125 K
 선발,오원석 (25),좌투,143-147,50,45,45,55,G 28 /  W 8 /  L 10 /  ERA 4.88  / 135.0 IP /  105 K
@@ -70,8 +32,7 @@ POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
 2군 불펜,임준형 (26),좌투,138-142,40,45,45,40,퓨처스
 2군 선발,이원재 (23),좌투,138-142,35,40,40,40,퓨처스 선발자원
 
-#### **[타자진]**
-DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
+D,P,H,NM,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,N
 1군,포수,우타,장성우(36),55,50,55,55,30,55,25시즌 / .260 AVG /  15 HR /  70 RBI,-,-
 1군,3루수,우타,황재균(39),45,45,50,45,30,40,에이징커브 / .245 AVG /  10 HR,-,-
 1군,2루수,우타,김상수(36),50,45,35,55,45,55,.265 AVG /  3 HR,-,-
@@ -104,11 +65,8 @@ DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
 2군,3루수,우타,강민성(27),40,45,50,30,30,30,퓨처스,-,-
 
 ---
-
-### **2. 삼성 라이온즈 (Samsung Lions)**
-
-#### **[투수진]**
-POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
+#Samsung
+P,NM,H,V,S,M,C,ST,N
 선발,원태인 (26),우투,145-149,70,60,65,70,25시즌 에이스 / G 27 /  W 14 /  L 6 /  ERA 3.20  / 165.0 IP /  130 K
 선발,최원태 (29),우투,143-147,50,45,45,55,G 25 /  W 8 /  L 8 /  ERA 4.50
 선발,양창섭 (27),우투,142-146,55,50,55,45,복귀 / G 10 / ERA 3.80
@@ -135,8 +93,7 @@ POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
 2군 불펜,양현 (34),우언,132-136,35,45,55,30,퓨처스
 2군 불펜,이재익 (32),좌투,140-144,40,40,40,30,퓨처스
 
-#### **[타자진]**
-DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
+D,P,H,NM,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,N
 1군,포수,우타,강민호(41),50,50,55,50,25,50,25시즌 / .280 AVG /  15 HR,-,-
 1군,2루수,우타,양도근(23),40,45,45,35,40,40,퓨처스,-,-
 1군,2루수,좌타,류지혁(32),55,50,30,55,60,65,G 110 / .270 AVG / 15 SB,-,-
@@ -172,11 +129,8 @@ DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
 2군,유격수,우타,박진우(23),40,40,40,35,40,40,퓨처스,-,-
 
 ---
-
-### **3. 한화 이글스 (Hanwha Eagles)**
-
-#### **[투수진]**
-POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
+#Hanwha
+P,NM,H,V,S,M,C,ST,N
 선발,류현진 (39),좌투,138-143,50,60,75,60,25시즌 / G 25 /  W 8 /  L 8 /  ERA 4.10  / 140.0 IP
 선발,문동주 (23),우투,155-161,75,60,50,65,25시즌 에이스 / G 28 /  W 12 /  L 6 /  ERA 3.50  / 160.0 IP /  150 K
 선발,엄상백 (30),우언,143-147,55,50,45,60,25시즌 / G 28 /  W 10 /  L 9 /  ERA 4.50
@@ -204,8 +158,7 @@ POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
 2군 불펜,김도빈 (25),우투,140-144,35,40,35,35,퓨처스
 2군 불펜,김승일 (25),우투,138-142,35,40,35,35,퓨처스
 
-#### **[타자진]**
-DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
+D,P,H,NM,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,N
 1군,포수,우타,최재훈(37),50,45,35,60,30,60,25시즌 / .250 AVG,-,-
 1군,1루수,우타,채은성(36),50,50,60,50,30,50,25시즌 / .265 AVG /  18 HR,-,-
 1군,2루수,좌타,황영묵(27),65,50,35,50,60,55,25시즌 골든글러브급 / .310 AVG / 15 SB,-,-
@@ -235,11 +188,8 @@ DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
 2군,좌익수,좌타,오재원(19),40,40,40,35,40,35,신인,-,-
 
 ---
-
-### **4. SSG 랜더스 (SSG Landers)**
-
-#### **[투수진]**
-POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
+#SSG
+P,NM,H,V,S,M,C,ST,N
 선발,김광현 (38),좌투,139-143,50,45,55,60,25시즌 / G 28 /  W 9 /  L 9 /  ERA 4.50  / 150.0 IP
 선발,김건우 (24),좌투,145-149,55,50,45,55,선발정착 / G 20 /  W 6 /  ERA 4.20
 선발,문승원 (37),우투,143-147,50,45,55,45,필승조 / G 60 / ERA 3.80
@@ -269,8 +219,7 @@ POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
 2군 불펜,박성빈 (23),우투,140-144,35,35,35,35,퓨처스
 2군 불펜,신지환 (20),좌투,135-139,35,40,40,35,신인
 
-#### **[타자진]**
-DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
+D,P,H,NM,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,N
 1군,포수,우타,조형우(24),50,45,50,40,40,55,주전도약 / .255 AVG / 10 HR,-,-
 1군,1루수,우타,고명준(24),55,55,65,40,35,40,25시즌 / .260 AVG / 20 HR,-,-
 1군,2루수,좌타,정준재(23),60,45,35,55,65,55,25시즌 / .290 AVG / 20 SB,-,-
@@ -306,11 +255,8 @@ DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
 2군,3루수,우타,문상준(25),40,35,35,35,40,40,퓨처스,-,-
 
 ---
-
-### **5. 키움 히어로즈 (Kiwoom Heroes)**
-
-#### **[투수진]**
-POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
+#Kiwoom
+P,NM,H,V,S,M,C,ST,N
 선발,안우진 (27),우투,156-160,80,65,60,65,25시즌 후반 복귀 / G 5 / ERA 2.50
 선발,하영민 (31),우투,142-146,50,45,55,60,25시즌 / G 25 /  ERA 4.50
 선발,정현우 (20),좌투,146-150,55,45,40,55,25시즌 신인 / G 20 / ERA 4.80
@@ -348,8 +294,7 @@ POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
 2군 불펜,배동현 (28),우투,140-144,35,40,35,35,퓨처스
 2군 불펜,최현우 (19),우투,140-144,40,40,35,35,신인
 
-#### **[타자진]**
-DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
+D,P,H,NM,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,N
 1군,포수,우타,김건희(22),55,50,60,45,45,45,25시즌 / .270 AVG / 12 HR,-,-
 1군,1루수,좌타,최주환(38),50,50,55,55,30,50,25시즌 / .260 AVG / 12 HR,-,-
 1군,2루수,좌타,김태진(31),50,40,35,40,55,50,.270 AVG,-,-
@@ -389,11 +334,8 @@ DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
 2군,유격수,우타,김리안(23),40,40,40,35,35,35,퓨처스,-,-
 
 ---
-
-### **6. NC 다이노스 (NC Dinos)**
-
-#### **[투수진]**
-POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
+#NC
+P,NM,H,V,S,M,C,ST,N
 선발,신민혁 (27),우투,140-144,55,45,60,60,G 28 /  W 10 /  ERA 4.20
 선발,구창모 (29),좌투,145-149,80,65,60,50,상무 제대 / 1군 에이스 복귀
 선발,김녹원 (23),우투,142-146,40,35,35,50,퓨처스
@@ -425,8 +367,7 @@ POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
 2군 불펜,김태현 (28),좌투,135-139,35,40,40,35,퓨처스
 2군 불펜,전루건 (26),우투,140-144,35,40,35,35,퓨처스
 
-#### **[타자진]**
-DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
+D,P,H,NM,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,N
 1군,포수,우타,김형준(27),45,50,65,50,35,60,25시즌 / 20 HR / .230 AVG,-,-
 1군,2루수,우타,서호철(30),55,45,40,45,50,60,25시즌 / .285 AVG,-,-
 1군,2루수,좌타,박민우(33),65,55,35,60,65,65,25시즌 / .315 AVG / 30 SB,-,-
@@ -458,11 +399,8 @@ DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
 2군,1루수,우타,김정호(28),40,40,40,35,35,35,퓨처스,-,-
 
 ---
-
-### **7. LG 트윈스 (LG Twins)**
-
-#### **[투수진]**
-POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
+#LG
+P,NM,H,V,S,M,C,ST,N
 선발,임찬규 (34),우투,138-142,50,55,70,65,25시즌 / G 28 /  W 12 /  ERA 3.90
 선발,손주영 (28),좌투,145-149,65,65,55,60,25시즌 15승 / G 30 /  ERA 3.20
 선발,송승기 (24),좌투,140-144,45,45,45,50,퓨처스
@@ -496,8 +434,7 @@ POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
 2군 불펜,이믿음 (26),우투,138-142,35,40,40,40,퓨처스
 2군 불펜,김종운 (20),우투,140-144,35,40,35,35,신인
 
-#### **[타자진]**
-DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
+D,P,H,NM,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,N
 1군,포수,우타,박동원(36),55,50,65,55,30,60,25시즌 / .265 AVG / 22 HR / 85 RBI,-,-
 1군,3루수,우타,김주성(28),45,45,45,40,40,45,백업,-,-
 1군,2루수,좌타,신민재(30),65,50,30,60,75,70,25시즌 / .300 AVG / 45 SB,-,-
@@ -527,11 +464,8 @@ DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
 2군,3루수,우타,최명경(25),35,35,35,35,35,35,퓨처스,-,-
 
 ---
-
-### **8. 롯데 자이언츠 (Lotte Giants)**
-
-#### **[투수진]**
-POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
+#Lotte
+P,NM,H,V,S,M,C,ST,N
 선발,박세웅 (31),우투,144-148,50,45,50,65,25시즌 / G 28 /  W 9 /  L 10 /  ERA 4.50  / 160.0 IP
 선발,나균안 (28),우투,142-146,45,45,45,50,부진 / G 15 / ERA 5.50
 선발,이민석 (23),우투,151-155,55,40,35,50,구속증가 / G 20 / ERA 4.80
@@ -564,8 +498,7 @@ POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
 2군 불펜,김영준 (27),우투,140-144,35,40,35,35,퓨처스
 2군 불펜,김주완 (23),좌투,138-142,35,40,35,35,퓨처스
 
-#### **[타자진]**
-DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
+D,P,H,NM,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,N
 1군,포수,우타,유강남(34),50,45,50,45,25,55,25시즌 부상복귀 / .230 AVG / 10 HR,-,부상
 1군,1루수,좌타,나승엽(24),60,55,50,65,50,50,25시즌 / .315 AVG / 10 HR / 70 RBI,-,-
 1군,2루수,좌타,고승민(26),60,60,50,55,60,45,25시즌 / .310 AVG / 15 HR / 90 RBI,-,-
@@ -600,11 +533,8 @@ DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
 2군,2루수,우타,강성우(21),40,40,40,35,35,35,퓨처스,-,-
 
 ---
-
-### **9. 두산 베어스 (Doosan Bears)**
-
-#### **[투수진]**
-POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
+#Doosan
+P,NM,H,V,S,M,C,ST,N
 선발,곽빈 (27),우투,150-154,70,55,50,65,25시즌 다승왕 경쟁 / W 15 / ERA 3.80
 선발,최승용 (25),좌투,143-147,55,50,55,55,G 20 / ERA 4.50
 선발,최민석 (20),우투,140-144,45,45,45,50,신인
@@ -634,8 +564,7 @@ POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
 2군 불펜,김호준 (28),좌투,138-142,35,40,35,35,퓨처스
 2군 불펜,서준오 (21),우투,141-145,40,40,40,40,퓨처스
 
-#### **[타자진]**
-DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
+D,P,H,NM,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,N
 1군,포수,우타,양의지(39),75,60,65,70,30,70,25시즌 / .310 AVG / 18 HR,-,-
 1군,1루수,우타,양석환(35),50,55,70,45,35,45,25시즌 홈런 3위 / .250 AVG / 30 HR,-,-
 1군,2루수,좌타,오명진(25),45,40,40,40,50,45,퓨처스,-,-
@@ -670,11 +599,8 @@ DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
 2군,포수,우타,장규빈(25),40,40,40,35,35,35,퓨처스,-,-
 
 ---
-
-### **10. KIA 타이거즈 (KIA Tigers)**
-
-#### **[투수진]**
-POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
+#KIA
+P,NM,H,V,S,M,C,ST,N
 선발,양현종 (38),좌투,138-142,50,50,60,65,25시즌 / G 28 /  W 10 /  ERA 4.20
 선발,이의리 (24),좌투,148-152,60,50,40,55,25시즌 재활복귀 / G 10 / ERA 3.90
 선발,김도현 (26),우투,144-148,55,50,50,55,선발정착 / G 25 /  W 8 /  ERA 4.50
@@ -710,8 +636,7 @@ POS,NAME,HAND,VEL,STF,MOV,CTL,STA,NOTE
 2군 불펜,유지성 (26),좌투,136-140,35,40,40,35,퓨처스
 2군 불펜,장재혁 (25),우투,140-144,35,40,35,35,퓨처스
 
-#### **[타자진]**
-DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
+D,P,H,NM,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,N
 1군,포수,좌타,한준수(27),55,50,50,45,45,45,25시즌 주전도약 / .290 AVG / 10 HR,-,-
 1군,1루수,좌타,오선우(30),50,60,65,40,35,30,퓨처스 홈런왕,-,-
 1군,2루수,우타,김선빈(37),70,50,30,60,45,70,25시즌 / .310 AVG,-,-
@@ -739,11 +664,5 @@ DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
 ---
 `;
 
-// [NEW] 구조화된 로스터 데이터 (Code-Level Data)
-// 런타임에 CSV를 파싱하여 TypeScript 객체 배열로 변환
-// 이 데이터는 더 이상 프롬프트에 포함되지 않고, 필요할 때 코드에서 조회하여 사용
 export const ROSTER_DATA: TeamRoster[] = parseRosterFromCSV(KBO_INITIAL_DATA_CSV);
-
-// [DEPRECATED] 하위 호환성을 위해 문자열 형태도 유지
-// 새로운 코드는 ROSTER_DATA를 직접 사용하세요
 export const KBO_INITIAL_DATA = KBO_INITIAL_DATA_CSV;

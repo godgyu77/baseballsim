@@ -36,6 +36,20 @@ export interface TeamRoster {
   batters: Player[];
 }
 
+// 팀 태그 매핑
+const TEAM_TAG_MAP: Record<string, string> = {
+  '#KT': 'KT Wiz',
+  '#Samsung': 'Samsung Lions',
+  '#Hanwha': 'Hanwha Eagles',
+  '#SSG': 'SSG Landers',
+  '#Kiwoom': 'Kiwoom Heroes',
+  '#NC': 'NC Dinos',
+  '#LG': 'LG Twins',
+  '#Lotte': 'Lotte Giants',
+  '#Doosan': 'Doosan Bears',
+  '#KIA': 'KIA Tigers',
+};
+
 /**
  * CSV 문자열을 파싱하여 로스터 데이터로 변환
  */
@@ -49,21 +63,39 @@ export function parseRosterFromCSV(csvText: string): TeamRoster[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     
-    // 팀 헤더 감지 (예: "### **1. KT 위즈 (KT Wiz)**")
+    // 팀 헤더 감지 (압축 형식: #KT, #SSG 등)
+    if (line.startsWith('#')) {
+      const teamName = TEAM_TAG_MAP[line];
+      if (teamName) {
+        if (currentTeam) {
+          teams.push(currentTeam);
+        }
+        currentTeam = {
+          team: teamName,
+          pitchers: [],
+          batters: [],
+        };
+        currentSection = null;
+        continue;
+      }
+    }
+    
+    // 기존 형식 지원 (하위 호환성)
     const teamMatch = line.match(/###\s*\*\*(\d+)\.\s*(.+?)\s*\((.+?)\)\*\*/);
     if (teamMatch) {
       if (currentTeam) {
         teams.push(currentTeam);
       }
       currentTeam = {
-        team: teamMatch[3], // 팀 약칭 (예: "KT Wiz")
+        team: teamMatch[3],
         pitchers: [],
         batters: [],
       };
+      currentSection = null;
       continue;
     }
     
-    // 섹션 헤더 감지
+    // 섹션 헤더 감지 (기존 형식)
     if (line.includes('**[투수진]**')) {
       currentSection = 'pitchers';
       continue;
@@ -73,8 +105,13 @@ export function parseRosterFromCSV(csvText: string): TeamRoster[] {
       continue;
     }
     
-    // CSV 헤더 라인 건너뛰기
-    if (line.startsWith('POS,') || line.startsWith('DIV,')) {
+    // CSV 헤더 감지 및 섹션 판단
+    if (line.startsWith('P,') || line.startsWith('POS,')) {
+      currentSection = 'pitchers';
+      continue;
+    }
+    if (line.startsWith('D,') || line.startsWith('DIV,')) {
+      currentSection = 'batters';
       continue;
     }
     
