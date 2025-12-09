@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // [CRITICAL] System Logic import
@@ -48,86 +47,65 @@ export default async function handler(
       });
     }
 
-    // Gemini API 초기화
-    const genAI = new GoogleGenerativeAI(apiKey);
-
     // Context Caching 생성
-    // 참고: @google/generative-ai SDK 버전에 따라 API가 다를 수 있음
-    // 방법 1: cachedContents.create (최신 SDK)
-    // 방법 2: caches.create (일부 버전)
-    // 방법 3: genAI.cachedContents (직접 접근)
+    // 참고: @google/generative-ai SDK 0.21.0에서는 cachedContents API가 직접 지원되지 않음
+    // 따라서 REST API를 직접 호출하여 캐시 생성
+    // 엔드포인트: POST https://generativelanguage.googleapis.com/v1beta/cachedContents
     
-    let cache: any = null;
-    let cacheName: string | null = null;
-
-    // 방법 1 시도: genAI.cachedContents.create
-    try {
-      if ((genAI as any).cachedContents && typeof (genAI as any).cachedContents.create === 'function') {
-        cache = await (genAI as any).cachedContents.create({
-          model: GEMINI_MODEL,
-          contents: [{
-            role: 'system',
+    console.log('[Context Caching] REST API로 캐시 생성 시도...');
+    console.log(`[Context Caching] System Logic 길이: ${KBO_SYSTEM_LOGIC.length}자`);
+    
+    const cacheResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/cachedContents?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: `models/${GEMINI_MODEL}`,
+          systemInstruction: {
             parts: [{ text: KBO_SYSTEM_LOGIC }],
-          }],
-          ttlSeconds: 3600, // 1시간 유지
-        });
-        cacheName = cache?.name;
+          },
+          ttl: '3600s', // 1시간 (ISO 8601 duration format: "3600s" = 3600초)
+        }),
       }
-    } catch (error) {
-      console.warn('[Context Caching] 방법 1 실패:', error);
-    }
+    );
 
-    // 방법 2 시도: genAI.caches.create
-    if (!cacheName) {
+    if (!cacheResponse.ok) {
+      const errorText = await cacheResponse.text();
+      let errorData;
       try {
-        if ((genAI as any).caches && typeof (genAI as any).caches.create === 'function') {
-          cache = await (genAI as any).caches.create({
-            model: GEMINI_MODEL,
-            config: {
-              contents: [{
-                role: 'system',
-                parts: [{ text: KBO_SYSTEM_LOGIC }],
-              }],
-            },
-            ttlSeconds: 3600,
-          });
-          cacheName = cache?.name;
-        }
-      } catch (error) {
-        console.warn('[Context Caching] 방법 2 실패:', error);
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { message: errorText };
       }
+      
+      console.error('[Context Caching] REST API 호출 실패:', {
+        status: cacheResponse.status,
+        statusText: cacheResponse.statusText,
+        error: errorData,
+      });
+      
+      throw new Error(
+        `Failed to create cache via REST API: ${cacheResponse.status} - ${errorData.error?.message || errorData.message || 'Unknown error'}`
+      );
     }
 
-    // 방법 3 시도: 모델 인스턴스를 통한 생성
-    if (!cacheName) {
-      try {
-        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-        if ((model as any).createCachedContent && typeof (model as any).createCachedContent === 'function') {
-          cache = await (model as any).createCachedContent({
-            model: GEMINI_MODEL,
-            contents: [{
-              role: 'system',
-              parts: [{ text: KBO_SYSTEM_LOGIC }],
-            }],
-            ttlSeconds: 3600,
-          });
-          cacheName = cache?.name;
-        }
-      } catch (error) {
-        console.warn('[Context Caching] 방법 3 실패:', error);
-      }
+    const cache = await cacheResponse.json();
+    
+    if (!cache || !cache.name) {
+      throw new Error('Failed to create cache: Invalid response from API');
     }
+    
+    const cacheName = cache.name;
 
-    if (!cacheName) {
-      throw new Error('Failed to create cache: All methods failed. SDK may not support cachedContents or API has changed.');
-    }
-
-    console.log(`[Context Caching] ✅ 캐시 생성 성공: ${cache.name}`);
+    console.log(`[Context Caching] ✅ 캐시 생성 성공: ${cacheName}`);
 
     // 캐시 ID 반환
     return res.status(200).json({
       success: true,
-      cacheId: cache.name,
+      cacheId: cacheName,
       expiresAt: Date.now() + 3600 * 1000, // 1시간 후 만료 (밀리초)
     });
 
