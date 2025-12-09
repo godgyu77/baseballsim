@@ -68,10 +68,45 @@ ${teamName}의 타자진 로스터만 출력하십시오.
 }`;
 }
 
+import { ROSTER_DATA } from '../constants/prompts/InitialData';
+
+/**
+ * [FIX] InitialData.ts에서 모든 선수 이름 추출 (유령 데이터 필터링용)
+ */
+function getAllPlayerNamesFromInitialData(): Set<string> {
+  const playerNames = new Set<string>();
+  
+  for (const team of ROSTER_DATA) {
+    for (const pitcher of team.pitchers) {
+      playerNames.add(pitcher.name);
+    }
+    for (const batter of team.batters) {
+      playerNames.add(batter.name);
+    }
+  }
+  
+  return playerNames;
+}
+
+/**
+ * [FIX] 선수 이름으로 올바른 팀 찾기 (잘못된 팀 배치 수정용)
+ */
+function findCorrectTeamForPlayer(playerName: string): string | null {
+  for (const team of ROSTER_DATA) {
+    const allPlayers = [...team.pitchers, ...team.batters];
+    if (allPlayers.some(p => p.name === playerName)) {
+      return team.team;
+    }
+  }
+  
+  return null;
+}
+
 /**
  * AI 응답에서 로스터 데이터 파싱
+ * [FIX] InitialData.ts에 없는 선수 필터링 및 잘못된 팀 배치 수정
  */
-function parseRosterFromResponse(responseText: string): Player[] {
+function parseRosterFromResponse(responseText: string, teamName: string): Player[] {
   const rosterRegex = /\[ROSTER:\s*(\[[\s\S]*?\])\]/gs;
   const rosterMatch = responseText.match(rosterRegex);
   
@@ -85,18 +120,46 @@ function parseRosterFromResponse(responseText: string): Player[] {
     if (jsonMatch && jsonMatch[1]) {
       const rosterArray = JSON.parse(jsonMatch[1]);
       if (Array.isArray(rosterArray)) {
-        return rosterArray.map((player: any) => ({
-          id: player.id || `${player.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          name: player.name || '',
-          position: player.position || '',
-          age: player.age,
-          division: player.division,
-          type: player.type,
-          stats: player.stats,
-          record: player.record,
-          salary: player.salary,
-          note: player.note,
-        }));
+        // [FIX] InitialData.ts에서 모든 선수 이름 가져오기
+        const validPlayerNames = getAllPlayerNamesFromInitialData();
+        
+        const filteredPlayers = rosterArray
+          .map((player: any) => {
+            const playerName = player.name || '';
+            
+            // [FIX] InitialData.ts에 없는 선수는 제외
+            if (!validPlayerNames.has(playerName)) {
+              console.warn(`[RosterFetcher] ⚠️ 유령 선수 감지 및 제외: "${playerName}" (InitialData.ts에 없음)`);
+              return null;
+            }
+            
+            // [FIX] 잘못된 팀에 배치된 선수 감지
+            const correctTeam = findCorrectTeamForPlayer(playerName);
+            if (correctTeam && correctTeam !== teamName) {
+              console.warn(`[RosterFetcher] ⚠️ 잘못된 팀 배치 감지: "${playerName}"는 "${correctTeam}"에 있어야 하는데 "${teamName}"에 배치됨. 제외합니다.`);
+              return null;
+            }
+            
+            return {
+              id: player.id || `${player.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              name: player.name || '',
+              position: player.position || '',
+              age: player.age,
+              division: player.division,
+              type: player.type,
+              stats: player.stats,
+              record: player.record,
+              salary: player.salary,
+              note: player.note,
+            };
+          })
+          .filter((p: Player | null): p is Player => p !== null);
+        
+        if (filteredPlayers.length < rosterArray.length) {
+          console.warn(`[RosterFetcher] ⚠️ ${rosterArray.length - filteredPlayers.length}명의 유령/잘못 배치된 선수가 필터링되었습니다.`);
+        }
+        
+        return filteredPlayers;
       }
     }
   } catch (e) {
@@ -129,7 +192,7 @@ export async function fetchPitcherRoster(
     }
   }
   
-  const pitchers = parseRosterFromResponse(fullText);
+  const pitchers = parseRosterFromResponse(fullText, teamName);
   console.log(`[RosterFetcher] 투수 로스터 수신 완료: ${pitchers.length}명`);
   
   return pitchers;
@@ -158,7 +221,7 @@ export async function fetchBatterRoster(
     }
   }
   
-  const batters = parseRosterFromResponse(fullText);
+  const batters = parseRosterFromResponse(fullText, teamName);
   console.log(`[RosterFetcher] 타자 로스터 수신 완료: ${batters.length}명`);
   
   return batters;

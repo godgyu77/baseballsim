@@ -92,8 +92,8 @@ export function validateInitialDataIntegrity(): {
       warnings.push(`팀 "${expectedTeam}"의 타자 수가 부족합니다. (현재: ${team.batters?.length || 0}, 최소: ${minBatters})`);
     }
 
-    // 4. 유령 데이터 검증 (이정후, 김하성 등 InitialData에 없는 선수)
-    const ghostPlayers = ['이정후', '김하성'];
+    // 4. 유령 데이터 검증 (이정후, 김하성, 김혜성, 오스틴 딘, 박병호 등 InitialData에 없는 선수)
+    const ghostPlayers = ['이정후', '김하성', '김혜성', '오스틴 딘', 'Austin Dean', '박병호'];
     const allPlayerNames = [
       ...(team.pitchers || []).map(p => p.name),
       ...(team.batters || []).map(b => b.name),
