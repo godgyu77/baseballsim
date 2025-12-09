@@ -22,6 +22,7 @@ import { isQuotaExceededError, getQuotaExceededMessage, getQuotaExceededAlertMes
 import { optimizeForTokenUsage } from '../lib/tokenOptimizer';
 import { compressHistory } from '../lib/historySummarizer';
 import { monitoringService, extractTokenUsageFromResponse } from '../lib/monitoring';
+import { injectDynamicContext, ContextInjectionOptions } from '../lib/contextInjector';
 import { debounce } from '../lib/debounce';
 import { SafeStorage, safeSetJSON, safeGetJSON } from '../lib/safeStorage';
 import { filterProtectedPlayers, validateDraftPicks, updatePlayerTeamAffiliation, sortDraftOrder, createDraftPool, DraftPlayer, ProtectedPlayer, TeamRank } from '../lib/draftUtils';
@@ -144,13 +145,32 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     // 신생 구단인 경우 구단 이름은 expansionTeamData에서 받은 값으로 고정 (절대 변경하지 않음)
     // AI 응답이나 사용자 메시지에서 구단명을 추출해도 업데이트하지 않음
     
-    // [OPTIMIZE] 사용자 입력 길이 제한 (토큰 절약)
-    // [FIX] 초기 데이터가 포함된 경우 최적화 건너뛰기
+    // [DYNAMIC CONTEXT INJECTION] 동적 컨텍스트 주입
+    // 초기화 단계가 아니면 InitialData 제거하고 필요한 데이터만 주입
     const isInitialData = userMessage.includes('[SYSTEM STATUS: FIXED]') || 
                           userMessage.includes('KBO_INITIAL_DATA') ||
                           userMessage.length > 30000;
     
-    const { optimizedUserInput } = optimizeForTokenUsage([], userMessage, isInitialData);
+    let contextInjectedMessage = userMessage;
+    
+    // 초기화가 아닌 경우 동적 컨텍스트 주입
+    if (!isInitialData && gamePhase !== 'TEAM_SELECTION') {
+      const contextOptions: ContextInjectionOptions = {
+        gamePhase,
+        userMessage,
+        currentRoster: currentRoster.length > 0 ? currentRoster : undefined,
+        teamBudget: gameState.budget || undefined,
+        facilities: facilities,
+        leagueStandings: Object.keys(leagueStandings).length > 0 ? leagueStandings : undefined,
+        transactionHistory: transactionHistory.length > 0 ? transactionHistory : undefined,
+      };
+      
+      contextInjectedMessage = injectDynamicContext(userMessage, contextOptions);
+      console.log(`[Dynamic Context] 주입 전: ${userMessage.length}자 → 주입 후: ${contextInjectedMessage.length}자`);
+    }
+    
+    // [OPTIMIZE] 사용자 입력 길이 제한 (토큰 절약)
+    const { optimizedUserInput } = optimizeForTokenUsage([], contextInjectedMessage, isInitialData);
     const optimizedMessage = optimizedUserInput;
     
     // 사용자 메시지를 화면에 추가 (hideFromUI가 false인 경우만)
@@ -1471,8 +1491,8 @@ ${difficultyConfig}
 
 ${facilityInfo}`;
         
-        // InitialData를 포함한 전체 프롬프트 생성
-        // [FIX] 프롬프트 최상단에 강제 주입하여 AI가 먼저 인식하도록 함
+        // [DYNAMIC CONTEXT] 초기화 시에만 InitialData 포함
+        // 이후 요청에서는 InitialData를 제거하고 필요한 데이터만 동적으로 주입
         const fullPromptWithData = `[SYSTEM STATUS: FIXED]
 - User Selected Team: ${selectedTeam.fullName} (Confirmed)
 - Difficulty: ${difficultyCode} (${difficultyMode}) (Confirmed)
