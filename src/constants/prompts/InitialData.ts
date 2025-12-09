@@ -1,5 +1,10 @@
 // Initial Data Prompts
-export const KBO_INITIAL_DATA = `# [INITIAL_DATA_PACK] 2026 Season Roster
+// [DEPRECATED] 이 문자열은 하위 호환성을 위해 유지됩니다.
+// 새로운 구조화된 데이터는 parseRosterFromCSV()를 사용하여 ROSTER_DATA에서 가져오세요.
+import { parseRosterFromCSV, type TeamRoster } from '../../data/RosterData';
+
+// 원본 CSV 데이터 (하위 호환성 유지)
+const KBO_INITIAL_DATA_CSV = `# [INITIAL_DATA_PACK] 2026 Season Roster
 
 아래 데이터를 기반으로 게임을 초기화하십시오. 이 데이터는 '6. Initial Data' 섹션으로 간주됩니다.
 
@@ -733,3 +738,12 @@ DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
 2군,유격수,우타,김두현(23),40,35,35,35,40,35,퓨처스,-,-
 ---
 `;
+
+// [NEW] 구조화된 로스터 데이터 (Code-Level Data)
+// 런타임에 CSV를 파싱하여 TypeScript 객체 배열로 변환
+// 이 데이터는 더 이상 프롬프트에 포함되지 않고, 필요할 때 코드에서 조회하여 사용
+export const ROSTER_DATA: TeamRoster[] = parseRosterFromCSV(KBO_INITIAL_DATA_CSV);
+
+// [DEPRECATED] 하위 호환성을 위해 문자열 형태도 유지
+// 새로운 코드는 ROSTER_DATA를 직접 사용하세요
+export const KBO_INITIAL_DATA = KBO_INITIAL_DATA_CSV;
