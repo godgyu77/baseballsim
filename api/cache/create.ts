@@ -3,7 +3,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // [CRITICAL] System Logic import
 // Vercel Serverless Functions에서는 같은 api/ 폴더 내의 파일을 import하는 것이 안전함
-import { KBO_SYSTEM_LOGIC } from '../SystemLogic';
+// ES modules에서는 .js 확장자를 명시해야 함 (TypeScript는 .ts로 작성하지만 런타임에는 .js)
+import { KBO_SYSTEM_LOGIC } from '../SystemLogic.js';
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
