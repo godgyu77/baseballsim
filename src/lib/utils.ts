@@ -1019,63 +1019,19 @@ export function parseAIResponse(message: string): ParsedMessage {
     }
   }
 
-  // [Roster-Validation] 로스터 무결성 검사 추가 - [ROSTER] 태그 찾기 및 파싱
-  // [FIX] InitialData.ts에 없는 선수 필터링
+  // [CRITICAL] AI 응답의 로스터는 절대 사용하지 않음
+  // InitialData.ts에서만 로스터를 가져오도록 변경
+  // [Roster-Validation] 로스터 무결성 검사 추가 - [ROSTER] 태그는 파싱하지 않음
   let roster: Player[] | undefined = undefined;
+  
+  // [CRITICAL] AI 응답의 [ROSTER] 태그는 무시
+  // 로스터는 InitialData.ts에서만 가져오므로 여기서는 파싱하지 않음
   const rosterRegex = /\[ROSTER:\s*(\[[\s\S]*?\])\]/gs;
   const rosterMatch = originalText.match(rosterRegex);
   
   if (rosterMatch) {
-    try {
-      const firstMatch = rosterMatch[0];
-      const jsonMatch = firstMatch.match(/\[ROSTER:\s*(\[[\s\S]*?\])\]/s);
-      if (jsonMatch && jsonMatch[1]) {
-        const rosterArray = JSON.parse(jsonMatch[1]);
-        if (Array.isArray(rosterArray)) {
-          // [FIX] InitialData.ts에서 모든 선수 이름 가져오기 (유령 데이터 필터링)
-          const validPlayerNames = new Set<string>();
-          for (const team of ROSTER_DATA) {
-            for (const pitcher of team.pitchers) {
-              validPlayerNames.add(pitcher.name);
-            }
-            for (const batter of team.batters) {
-              validPlayerNames.add(batter.name);
-            }
-          }
-          
-          roster = rosterArray
-            .map((player: any) => {
-              const playerName = player.name || '';
-              
-              // [FIX] InitialData.ts에 없는 선수는 제외
-              if (!validPlayerNames.has(playerName)) {
-                console.warn(`[Roster-Validation] ⚠️ 유령 선수 감지 및 제외: "${playerName}" (InitialData.ts에 없음)`);
-                return null;
-              }
-              
-              return {
-                id: player.id || `${player.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                name: player.name || '',
-                position: player.position || '',
-                age: player.age,
-                division: player.division,
-                type: player.type,
-                stats: player.stats,
-                record: player.record,
-                salary: player.salary,
-                note: player.note,
-              };
-            })
-            .filter((p: Player | null): p is Player => p !== null);
-          
-          if (roster.length < rosterArray.length) {
-            console.warn(`[Roster-Validation] ⚠️ ${rosterArray.length - roster.length}명의 유령 선수가 필터링되었습니다.`);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('[Roster-Validation] ROSTER 태그 파싱 오류:', e);
-    }
+    console.warn(`[Roster-Validation] ⚠️ AI 응답의 [ROSTER] 태그는 무시됩니다. InitialData.ts에서만 로스터를 가져옵니다.`);
+    // roster는 undefined로 유지 (사용하지 않음)
   }
 
   // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - <GAME_RESULTS> 태그 파싱

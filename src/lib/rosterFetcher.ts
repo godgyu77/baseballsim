@@ -143,69 +143,13 @@ function findCorrectTeamForPlayer(playerName: string): string | null {
 }
 
 /**
- * AI 응답에서 로스터 데이터 파싱
- * [FIX] InitialData.ts에 없는 선수 필터링 및 잘못된 팀 배치 수정
+ * [CRITICAL] AI 응답에서 로스터 데이터 파싱 - 더 이상 사용하지 않음
+ * InitialData.ts에서만 로스터를 가져오도록 변경
+ * @deprecated AI 응답의 로스터를 파싱하지 않고, InitialData.ts에서 직접 가져오세요
  */
 function parseRosterFromResponse(responseText: string, teamName: string): Player[] {
-  const rosterRegex = /\[ROSTER:\s*(\[[\s\S]*?\])\]/gs;
-  const rosterMatch = responseText.match(rosterRegex);
-  
-  if (!rosterMatch) {
-    return [];
-  }
-  
-  try {
-    const firstMatch = rosterMatch[0];
-    const jsonMatch = firstMatch.match(/\[ROSTER:\s*(\[[\s\S]*?\])\]/s);
-    if (jsonMatch && jsonMatch[1]) {
-      const rosterArray = JSON.parse(jsonMatch[1]);
-      if (Array.isArray(rosterArray)) {
-        // [FIX] InitialData.ts에서 모든 선수 이름 가져오기
-        const validPlayerNames = getAllPlayerNamesFromInitialData();
-        
-        const filteredPlayers = rosterArray
-          .map((player: any) => {
-            const playerName = player.name || '';
-            
-            // [FIX] InitialData.ts에 없는 선수는 제외
-            if (!validPlayerNames.has(playerName)) {
-              console.warn(`[RosterFetcher] ⚠️ 유령 선수 감지 및 제외: "${playerName}" (InitialData.ts에 없음)`);
-              return null;
-            }
-            
-            // [FIX] 잘못된 팀에 배치된 선수 감지 (한글명/영문명 모두 매칭)
-            const correctTeam = findCorrectTeamForPlayer(playerName);
-            if (correctTeam && !isSameTeam(correctTeam, teamName)) {
-              console.warn(`[RosterFetcher] ⚠️ 잘못된 팀 배치 감지: "${playerName}"는 "${correctTeam}"에 있어야 하는데 "${teamName}"에 배치됨. 제외합니다.`);
-              return null;
-            }
-            
-            return {
-              id: player.id || `${player.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              name: player.name || '',
-              position: player.position || '',
-              age: player.age,
-              division: player.division,
-              type: player.type,
-              stats: player.stats,
-              record: player.record,
-              salary: player.salary,
-              note: player.note,
-            };
-          })
-          .filter((p: Player | null): p is Player => p !== null);
-        
-        if (filteredPlayers.length < rosterArray.length) {
-          console.warn(`[RosterFetcher] ⚠️ ${rosterArray.length - filteredPlayers.length}명의 유령/잘못 배치된 선수가 필터링되었습니다.`);
-        }
-        
-        return filteredPlayers;
-      }
-    }
-  } catch (e) {
-    console.error('[RosterFetcher] 로스터 파싱 오류:', e);
-  }
-  
+  // [CRITICAL] AI 응답의 로스터는 절대 사용하지 않음
+  console.warn(`[RosterFetcher] ⚠️ AI 응답의 로스터 파싱은 무시됩니다. InitialData.ts에서만 로스터를 가져옵니다.`);
   return [];
 }
 
@@ -232,8 +176,11 @@ export async function fetchPitcherRoster(
     }
   }
   
-  const pitchers = parseRosterFromResponse(fullText, teamName);
-  console.log(`[RosterFetcher] 투수 로스터 수신 완료: ${pitchers.length}명`);
+  // [CRITICAL] AI 응답의 로스터를 무시하고 InitialData.ts에서만 가져오기
+  console.warn(`[RosterFetcher] ⚠️ AI 응답의 투수 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
+  const allPlayers = getRosterFromInitialDataOnly(teamName);
+  const pitchers = allPlayers.filter(p => p.type === 'pitcher');
+  console.log(`[RosterFetcher] InitialData.ts에서 투수 로스터 로드 완료: ${pitchers.length}명`);
   
   return pitchers;
 }
@@ -261,14 +208,18 @@ export async function fetchBatterRoster(
     }
   }
   
-  const batters = parseRosterFromResponse(fullText, teamName);
-  console.log(`[RosterFetcher] 타자 로스터 수신 완료: ${batters.length}명`);
+  // [CRITICAL] AI 응답의 로스터를 무시하고 InitialData.ts에서만 가져오기
+  console.warn(`[RosterFetcher] ⚠️ AI 응답의 타자 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
+  const allPlayers = getRosterFromInitialDataOnly(teamName);
+  const batters = allPlayers.filter(p => p.type === 'batter');
+  console.log(`[RosterFetcher] InitialData.ts에서 타자 로스터 로드 완료: ${batters.length}명`);
   
   return batters;
 }
 
 /**
- * 투수와 타자 로스터를 순차적으로 요청하여 전체 로스터 완성
+ * [CRITICAL] InitialData.ts에서 직접 전체 로스터 가져오기
+ * AI 응답을 사용하지 않고 InitialData.ts만 사용
  */
 export async function fetchFullRosterSequentially(
   chatInstance: any,
@@ -276,15 +227,25 @@ export async function fetchFullRosterSequentially(
   onProgress?: (status: string) => void
 ): Promise<RosterFetchResult> {
   try {
-    // Step 1: 투수 로스터 요청
-    const pitchers = await fetchPitcherRoster(chatInstance, teamName, onProgress);
+    // [CRITICAL] AI 응답을 무시하고 InitialData.ts에서만 가져오기
+    if (onProgress) {
+      onProgress('InitialData.ts에서 로스터 로드 중...');
+    }
+    
+    console.warn(`[RosterFetcher] ⚠️ AI 응답을 무시하고 InitialData.ts에서 직접 로스터를 로드합니다.`);
+    const allPlayers = getRosterFromInitialDataOnly(teamName);
+    
+    // 투수와 타자 분리
+    const pitchers = allPlayers.filter(p => p.type === 'pitcher');
+    const batters = allPlayers.filter(p => p.type === 'batter');
+    
+    if (onProgress) {
+      onProgress('로스터 로드 완료');
+    }
     
     if (pitchers.length < 20) {
       console.warn(`[RosterFetcher] 투수 로스터가 예상보다 적습니다: ${pitchers.length}명`);
     }
-    
-    // Step 2: 타자 로스터 요청
-    const batters = await fetchBatterRoster(chatInstance, teamName, onProgress);
     
     if (batters.length < 30) {
       console.warn(`[RosterFetcher] 타자 로스터가 예상보다 적습니다: ${batters.length}명`);

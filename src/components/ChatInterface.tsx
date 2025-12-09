@@ -31,7 +31,7 @@ import { getInitialBudget } from '../constants/GameConfig';
 import { Team } from '../constants/TeamData';
 import { KBO_INITIAL_DATA } from '../constants/prompts';
 import { getInitialRosterForTeam, getCompactAllRosters } from '../lib/rosterFormatter';
-import { filterRosterByInitialData } from '../lib/dataIntegrity';
+import { getRosterFromInitialDataOnly } from '../lib/dataIntegrity';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
 import { createInitialFacilityState, FACILITY_DEFINITIONS } from '../constants/Facilities';
@@ -643,10 +643,11 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                   console.warn(`  ${index + 1}. ${warning}`);
                 });
               }
-              // [FIX] InitialData.ts 기반 엄격한 필터링 적용
-              const filteredRoster = filterRosterByInitialData(parsed.roster, selectedTeam.fullName);
-              setCurrentRoster(filteredRoster);
-              console.log(`[Roster-Validation] ✅ 로스터 업데이트 완료: ${filteredRoster.length}명 (필터링 전: ${parsed.roster.length}명)`);
+              // [CRITICAL] AI 응답의 로스터를 무시하고 InitialData.ts에서만 가져오기
+              console.warn(`[Data Integrity] ⚠️ AI 응답의 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
+              const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
+              setCurrentRoster(rosterFromInitialData);
+              console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
             }
           }
 
@@ -1095,13 +1096,12 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                 if (parsed.transactionHistory && Array.isArray(parsed.transactionHistory)) {
                   setTransactionHistory(parsed.transactionHistory);
                 }
+                // [CRITICAL] 저장된 로스터를 무시하고 InitialData.ts에서만 가져오기
                 // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
-                if (parsed.currentRoster && Array.isArray(parsed.currentRoster)) {
-                  // [FIX] InitialData.ts 기반 엄격한 필터링 적용
-                  const filteredRoster = filterRosterByInitialData(parsed.currentRoster, selectedTeam.fullName);
-                  setCurrentRoster(filteredRoster);
-                  console.log(`[Roster-Validation] ✅ 로스터 복원 완료: ${filteredRoster.length}명 (필터링 전: ${parsed.currentRoster.length}명)`);
-                }
+                console.warn(`[Data Integrity] ⚠️ 저장된 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
+                const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
+                setCurrentRoster(rosterFromInitialData);
+                console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
                 // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
                 if (parsed.leagueStandings && typeof parsed.leagueStandings === 'object') {
                   setLeagueStandings(parsed.leagueStandings);
@@ -2118,13 +2118,12 @@ ${definition.effect(result.newLevel).description}
             if (data.transactionHistory && Array.isArray(data.transactionHistory)) {
               setTransactionHistory(data.transactionHistory);
             }
+            // [CRITICAL] 저장된 로스터를 무시하고 InitialData.ts에서만 가져오기
             // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
-            if (data.currentRoster && Array.isArray(data.currentRoster)) {
-              // [FIX] InitialData.ts 기반 엄격한 필터링 적용
-              const filteredRoster = filterRosterByInitialData(data.currentRoster, selectedTeam.fullName);
-              setCurrentRoster(filteredRoster);
-              console.log(`[Roster-Validation] ✅ 로스터 복원 완료: ${filteredRoster.length}명 (필터링 전: ${data.currentRoster.length}명)`);
-            }
+            console.warn(`[Data Integrity] ⚠️ 저장된 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
+            const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
+            setCurrentRoster(rosterFromInitialData);
+            console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
             // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
             if (data.leagueStandings && typeof data.leagueStandings === 'object') {
               setLeagueStandings(data.leagueStandings);
@@ -2246,13 +2245,12 @@ ${definition.effect(result.newLevel).description}
       if (data.transactionHistory && Array.isArray(data.transactionHistory)) {
         setTransactionHistory(data.transactionHistory);
       }
+      // [CRITICAL] 저장된 로스터를 무시하고 InitialData.ts에서만 가져오기
       // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
-      if (data.currentRoster && Array.isArray(data.currentRoster)) {
-        // [FIX] InitialData.ts 기반 엄격한 필터링 적용
-        const filteredRoster = filterRosterByInitialData(data.currentRoster, selectedTeam.fullName);
-        setCurrentRoster(filteredRoster);
-        console.log(`[Roster-Validation] ✅ 로스터 복원 완료: ${filteredRoster.length}명 (필터링 전: ${data.currentRoster.length}명)`);
-      }
+      console.warn(`[Data Integrity] ⚠️ 저장된 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
+      const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
+      setCurrentRoster(rosterFromInitialData);
+      console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
       // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
       if (data.leagueStandings && typeof data.leagueStandings === 'object') {
         setLeagueStandings(data.leagueStandings);
@@ -2465,13 +2463,12 @@ ${definition.effect(result.newLevel).description}
       if (parsed.transactionHistory && Array.isArray(parsed.transactionHistory)) {
         setTransactionHistory(parsed.transactionHistory);
       }
+      // [CRITICAL] 저장된 로스터를 무시하고 InitialData.ts에서만 가져오기
       // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
-      if (parsed.currentRoster && Array.isArray(parsed.currentRoster)) {
-        // [FIX] InitialData.ts 기반 엄격한 필터링 적용
-        const filteredRoster = filterRosterByInitialData(parsed.currentRoster, selectedTeam.fullName);
-        setCurrentRoster(filteredRoster);
-        console.log(`[Roster-Validation] ✅ 로스터 복원 완료: ${filteredRoster.length}명 (필터링 전: ${parsed.currentRoster.length}명)`);
-      }
+      console.warn(`[Data Integrity] ⚠️ 저장된 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
+      const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
+      setCurrentRoster(rosterFromInitialData);
+      console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
       // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
       if (parsed.leagueStandings && typeof parsed.leagueStandings === 'object') {
         setLeagueStandings(parsed.leagueStandings);
