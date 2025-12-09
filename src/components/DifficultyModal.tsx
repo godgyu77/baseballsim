@@ -130,6 +130,50 @@ export default function DifficultyModal({ isOpen, onSelect }: DifficultyModalPro
                     </ul>
                   </motion.button>
 
+                  {/* 하드 모드 */}
+                  <motion.button
+                    whileHover={{ scale: 1.02, y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => onSelect('HARD')}
+                    className="p-4 sm:p-5 md:p-6 bg-gradient-to-br from-orange-50 to-amber-50 border-2 border-orange-300 rounded-xl hover:border-orange-500 transition-all text-left touch-manipulation"
+                  >
+                    <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                      <div className="p-1.5 sm:p-2 bg-orange-500 rounded-lg">
+                        <Shield className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="text-base sm:text-lg md:text-xl font-bold text-orange-800">하드 모드</h3>
+                        <p className="text-[10px] sm:text-xs md:text-sm text-orange-600">도전적/공정</p>
+                      </div>
+                    </div>
+                    <ul className="space-y-1.5 sm:space-y-2 text-[10px] sm:text-xs md:text-sm text-gray-700">
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-orange-600 mt-0.5">•</span>
+                        <span>초기 자금: <strong className="text-orange-800">20.0억 원</strong></span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-orange-600 mt-0.5">•</span>
+                        <span>선수단 샐러리캡: <strong className="text-orange-800">120억 원</strong></span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-orange-600 mt-0.5">•</span>
+                        <span>용병 샐러리캡: <strong className="text-orange-800">47.5억 원</strong></span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-orange-600 mt-0.5">•</span>
+                        <span>아시아 쿼터 샐러리캡: <strong className="text-orange-800">2.5억 원</strong></span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-orange-600 mt-0.5">•</span>
+                        <span>수입 <strong className="text-orange-800">0.9배</strong> 감소</span>
+                      </li>
+                      <li className="flex items-start gap-1.5 sm:gap-2">
+                        <span className="text-orange-600 mt-0.5">•</span>
+                        <span>부상 빈도 1.5배, 소프트 캡</span>
+                      </li>
+                    </ul>
+                  </motion.button>
+
                   {/* 헬 모드 */}
                   <motion.button
                     whileHover={{ scale: 1.02, y: -2 }}

@@ -34,7 +34,7 @@ export const GAME_CONFIG: Record<Difficulty, DifficultyConfig> = {
     mercenarySalaryCap: 47.5, // 프롬프트: 47.5억 (Normal 55억과 Hell 40억의 중간) - 외국인 용병만
     asianQuarterSalaryCap: 2.5, // 프롬프트: 2.5억 원 (Normal 3.0억과 Hell 2.0억의 중간) - 아시아 쿼터만
     incomeMultiplier: 0.9, // 프롬프트: 0.9배(90%) (Normal 1.0배와 Hell 0.8배의 중간)
-    expenseMultiplier: 1.1, // 프롬프트: 지출 1.1배 증가 (Hell 1.2배보다 낮음)
+    // expenseMultiplier 제거: 지출 증가 없음 (헬 모드만 지출 증가 적용)
     isHardCap: false, // 소프트 캡 (사치세 적용)
   },
   HELL: {

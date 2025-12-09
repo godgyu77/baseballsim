@@ -23,8 +23,48 @@ let cacheCreationAttempted = false; // 캐시 생성 시도 여부 (중복 시�
 const modelCache = new Map<string, any>();
 
 /**
- * [Context Caching] 브라우저 환경에서 cachedContent 생성 시도
+ * [Context Caching] 서버 사이드에서 캐시 생성 (Vercel API Route 사용)
  * 
+ * @param apiKey API 키
+ * @returns 캐시 이름 또는 null (생성 실패 시)
+ */
+async function createCacheOnServer(apiKey: string): Promise<string | null> {
+  try {
+    console.log('[Context Caching] ⚡ 서버에서 캐시 생성 시도...');
+    
+    const response = await fetch('/api/cache/create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ apiKey }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`Server error: ${response.status} - ${errorData.message || 'Unknown error'}`);
+    }
+
+    const data = await response.json();
+    
+    if (data.success && data.cacheId) {
+      console.log(`[Context Caching] ✅ 서버에서 캐시 생성 성공: ${data.cacheId}`);
+      console.log(`[Context Caching] 캐시 만료 시간: ${new Date(data.expiresAt).toLocaleString()}`);
+      return data.cacheId;
+    }
+
+    return null;
+  } catch (error: any) {
+    console.error('[Context Caching] ❌ 서버 캐시 생성 실패:', error);
+    console.warn('[Context Caching] 💡 Fallback: 기존 방식 사용 (System Instruction 매번 전송)');
+    return null;
+  }
+}
+
+/**
+ * [Context Caching] 브라우저 환경에서 cachedContent 생성 시도 (Deprecated)
+ * 
+ * @deprecated 브라우저 환경에서는 작동하지 않으므로 서버 사이드 방식을 사용하세요.
  * @param genAI GoogleGenerativeAI 인스턴스
  * @param apiKey API 키
  * @returns 캐시 이름 또는 null (생성 실패 시)
@@ -141,12 +181,13 @@ export async function getGeminiModel(apiKey: string) {
     return model;
   }
   
-  // [Context Caching] 2. 캐시가 없다면 생성 시도 (최초 1회만)
+  // [Context Caching] 2. 캐시가 없다면 서버에서 생성 시도 (최초 1회만)
   if (!cacheCreationAttempted) {
     cacheCreationAttempted = true;
-    console.log('[Context Caching] ⚡ Creating New Cache on Server...');
+    console.log('[Context Caching] ⚡ 서버에서 캐시 생성 시도...');
     
-    const cacheName = await tryCreateCachedContent(genAI, apiKey);
+    // 서버 사이드 Context Caching 사용 (권장)
+    const cacheName = await createCacheOnServer(apiKey);
     
     if (cacheName) {
       // 캐시 생성 성공: 캐시 이름 저장
@@ -159,11 +200,26 @@ export async function getGeminiModel(apiKey: string) {
       });
       
       modelCache.set(apiKey, model);
-      console.log('[Context Caching] ✅ Context Caching 활성화: System Instruction 토큰 비용 절감');
+      console.log('[Context Caching] ✅ Context Caching 활성화: System Instruction 토큰 비용 0원');
       return model;
     } else {
-      // 캐시 생성 실패: 기존 방식으로 fallback
-      console.warn('[Context Caching] ⚠️ 브라우저 환경에서 Context Caching 불가: 기존 방식 사용 (System Instruction 매번 전송)');
+      // 서버 캐시 생성 실패: 브라우저 방식 시도 (Fallback)
+      console.warn('[Context Caching] ⚠️ 서버 캐시 생성 실패, 브라우저 방식 시도...');
+      const browserCacheName = await tryCreateCachedContent(genAI, apiKey);
+      
+      if (browserCacheName) {
+        activeCacheName = browserCacheName;
+        const model = genAI.getGenerativeModel({
+          model: GEMINI_MODEL,
+          cachedContent: activeCacheName,
+        });
+        modelCache.set(apiKey, model);
+        console.log('[Context Caching] ✅ 브라우저에서 Context Caching 활성화');
+        return model;
+      } else {
+        // 모든 방법 실패: 기존 방식으로 fallback
+        console.warn('[Context Caching] ⚠️ 모든 캐시 생성 방법 실패: 기존 방식 사용 (System Instruction 매번 전송)');
+      }
     }
   }
   

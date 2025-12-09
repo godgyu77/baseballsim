@@ -155,20 +155,21 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     
     // 사용자 메시지를 화면에 추가 (hideFromUI가 false인 경우만)
     // 화면에는 원본 메시지 표시 (사용자 경험 유지)
-    // [4K 최적화] 메시지 개수 제한 (최대 150개 유지)
+    // [TOKEN OPTIMIZATION] 메시지 개수 제한 (최대 50개 유지, 150 → 50으로 축소)
     if (!hideFromUI) {
       setMessages((prev) => {
         const newMessages = [...prev, { text: displayMessage, isUser: true }];
-        return newMessages.length > 150 ? newMessages.slice(-150) : newMessages;
+        return newMessages.length > 50 ? newMessages.slice(-50) : newMessages;
       });
     }
     
     // messagesRef 업데이트 (API 히스토리 생성을 위해 실제 전송할 메시지 저장)
-    // 최적화된 메시지를 저장하여 다음 API 호출 시 토큰 절약
+    // [TOKEN OPTIMIZATION] 최적화된 메시지를 저장하여 다음 API 호출 시 토큰 절약
     // hideFromUI가 true여도 API 히스토리를 위해 messagesRef에는 실제 메시지 저장
     messagesRef.current = [...messagesRef.current, { text: optimizedMessage, isUser: true }];
-    if (messagesRef.current.length > 150) {
-      messagesRef.current = messagesRef.current.slice(-150);
+    // [TOKEN OPTIMIZATION] 150 → 50으로 축소 (약 67% 절감)
+    if (messagesRef.current.length > 50) {
+      messagesRef.current = messagesRef.current.slice(-50);
     }
     
     // [UX Optimization] 로딩 오버레이 제거 - 스트리밍 텍스트가 자연스럽게 나타나도록
@@ -213,7 +214,10 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           ? history.slice(1) // 첫 번째 model 메시지 제거
           : history;
 
-        // [OPTIMIZE] 토큰 절약을 위한 스마트 압축 적용
+        // [TOKEN OPTIMIZATION] 압축 전 원본 히스토리 저장 (모니터링용)
+        const originalHistoryBeforeCompression = [...safeHistory];
+
+        // [TOKEN OPTIMIZATION] 토큰 절약을 위한 스마트 압축 적용
         // [FIX] 초기 데이터가 포함된 경우 최적화 건너뛰기
         const isInitialData = optimizedMessage.includes('[SYSTEM STATUS: FIXED]') || 
                               optimizedMessage.includes('KBO_INITIAL_DATA') ||
@@ -224,7 +228,16 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           // 1. 히스토리 정리 (메타데이터 제거)
           const { optimizedHistory } = optimizeForTokenUsage(safeHistory, '', false);
           // 2. 스마트 압축 (오래된 대화 요약 + 최근 대화 유지, 페르소나 보존)
-          finalSafeHistory = compressHistory(optimizedHistory, 15);
+          // [TOKEN OPTIMIZATION] 6 → 3으로 추가 축소 (약 80% 절감)
+          finalSafeHistory = compressHistory(optimizedHistory, 3);
+          
+          // 3. [TOKEN OPTIMIZATION] Initial Data 포함 메시지 제거 (초기화 후에는 불필요)
+          finalSafeHistory = finalSafeHistory.filter(msg => {
+            const text = msg.parts[0]?.text || '';
+            return !text.includes('[INITIAL_DATA_PACK]') && 
+                   !text.includes('KBO_INITIAL_DATA') &&
+                   !text.includes('[SYSTEM STATUS: FIXED]');
+          });
         } else {
           console.log('[TokenOptimizer] 초기 데이터 프롬프트: 히스토리 최적화 건너뛰기');
         }
@@ -234,8 +247,9 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
         });
         console.log('[handleSend] 채팅 인스턴스 생성 완료');
         
-        // [FIX] 모니터링을 위해 safeHistory를 상위 스코프에 저장
+        // [TOKEN OPTIMIZATION] 모니터링을 위해 압축 전/후 히스토리 저장
         (chatInstanceRef.current as any)._safeHistory = finalSafeHistory;
+        (chatInstanceRef.current as any)._originalHistory = originalHistoryBeforeCompression;
       }
 
       // [OPTIMIZE] 사용자 입력은 이미 위에서 최적화되었으므로 그대로 사용
@@ -350,20 +364,29 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
             const inputTokens = usageMetadata.promptTokenCount || 0;
             const outputTokens = usageMetadata.candidatesTokenCount || 0;
             
-            // [FIX] safeHistory 변수 참조 수정
+            // [TOKEN OPTIMIZATION] 압축 전/후 길이 제대로 추적
             const currentHistory = (chatInstanceRef.current as any)?._safeHistory || [];
-            const originalHistoryLength = currentHistory.length;
-            const compressedHistoryLength = currentHistory.length; // 압축 후 길이
+            const originalHistory = (chatInstanceRef.current as any)?._originalHistory || currentHistory;
+            
+            // 문자 수 기준으로 압축률 계산
+            const originalLength = originalHistory.reduce((sum: number, msg: any) => 
+              sum + (msg.parts?.[0]?.text?.length || 0), 0);
+            const compressedLength = currentHistory.reduce((sum: number, msg: any) => 
+              sum + (msg.parts?.[0]?.text?.length || 0), 0);
             
             monitoringService.recordTokenUsage(
               inputTokens,
               outputTokens,
-              originalHistoryLength,
-              compressedHistoryLength
+              originalLength, // 문자 수 기준
+              compressedLength // 압축 후 문자 수
             );
             
-            // [FIX] 토큰 사용량 로그 출력
-            console.log(`💰 [Estimated Tokens] Input=${inputTokens}, Output=${outputTokens}`);
+            // [TOKEN OPTIMIZATION] 토큰 사용량 및 압축률 로그 출력
+            const compressionRate = originalLength > 0 
+              ? ((1 - compressedLength / originalLength) * 100).toFixed(1) 
+              : '0';
+            console.log(`💰 [Token Usage] Input=${inputTokens}, Output=${outputTokens}, Total=${inputTokens + outputTokens}`);
+            console.log(`📊 [Compression] ${originalLength}자 → ${compressedLength}자 (${compressionRate}% 압축)`);
           }
         } catch (monitoringError) {
           // 모니터링 오류는 무시 (게임 진행에 영향 없음)
@@ -1230,12 +1253,14 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       
       // 2단계: 팀 정보를 포함한 프롬프트 생성 및 전송
       if (selectedTeam.id === 'expansion') {
-        const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
+        const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : difficulty === 'HARD' ? '하드 모드' : '헬 모드';
         const difficultyCode = difficulty;
         const difficultyConfig = difficulty === 'EASY' 
           ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
           : difficulty === 'NORMAL'
           ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
+          : difficulty === 'HARD'
+          ? '초기 자금: 20.0억 원, 샐러리캡: 120억 원'
           : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
         
         const ownerTypeName = expansionTeamData?.ownerType === 'A' 
@@ -1413,7 +1438,7 @@ ${fullPrompt}
         console.log('📋 [State] selectedTeam.fullName:', selectedTeam?.fullName);
         console.log('📋 [State] difficulty:', difficulty);
         
-        const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
+        const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : difficulty === 'HARD' ? '하드 모드' : '헬 모드';
         const difficultyCode = difficulty;
         
         // 🚀 [DEBUG] 난이도 변환 확인
@@ -1423,6 +1448,8 @@ ${fullPrompt}
           ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
           : difficulty === 'NORMAL'
           ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
+          : difficulty === 'HARD'
+          ? '초기 자금: 20.0억 원, 샐러리캡: 120억 원'
           : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
         
         const facilityInfo = `**[현재 시설 레벨]**

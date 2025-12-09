@@ -139,11 +139,7 @@ function AppContent() {
         
         setSelectedTeam(parsed.selectedTeam);
         if (parsed.difficulty) {
-          if (parsed.difficulty === 'HARD') {
-            setDifficulty('HELL');
-          } else {
-            setDifficulty(parsed.difficulty as Difficulty);
-          }
+          setDifficulty(parsed.difficulty as Difficulty);
         } else {
           setDifficulty('NORMAL');
         }
@@ -201,11 +197,7 @@ function AppContent() {
             
             // 난이도 복원
             if (data.difficulty) {
-              if (data.difficulty === 'HARD') {
-                setDifficulty('HELL');
-              } else {
-                setDifficulty(data.difficulty as Difficulty);
-              }
+              setDifficulty(data.difficulty as Difficulty);
             } else {
               setDifficulty('NORMAL');
             }
