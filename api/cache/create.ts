@@ -2,9 +2,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // [CRITICAL] System Logic import
-// Vercel Serverless Functions에서는 상대 경로로 import 가능
-// TypeScript 빌드 시 번들링됨
-import { KBO_SYSTEM_LOGIC } from '../../src/constants/prompts/SystemLogic';
+// Vercel Serverless Functions에서는 같은 api/ 폴더 내의 파일을 import하는 것이 안전함
+import { KBO_SYSTEM_LOGIC } from '../SystemLogic';
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -37,6 +36,15 @@ export default async function handler(
 
     if (!apiKey || typeof apiKey !== 'string') {
       return res.status(400).json({ error: 'API key is required' });
+    }
+
+    // System Logic 확인
+    if (!KBO_SYSTEM_LOGIC || KBO_SYSTEM_LOGIC.length < 1000) {
+      console.error('[Context Caching] System Logic이 로드되지 않았습니다.');
+      return res.status(500).json({
+        error: 'System Logic not loaded',
+        message: 'System Logic 파일을 불러올 수 없습니다. Vercel 빌드 설정을 확인하세요.',
+      });
     }
 
     // Gemini API 초기화
@@ -123,19 +131,32 @@ export default async function handler(
     });
 
   } catch (error: any) {
-    console.error('[Context Caching] ❌ 캐시 생성 실패:', error);
+    // 상세한 에러 로깅
+    const errorDetails = {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      systemLogicLoaded: !!KBO_SYSTEM_LOGIC,
+      systemLogicLength: KBO_SYSTEM_LOGIC?.length || 0,
+    };
+    
+    console.error('[Context Caching] ❌ 캐시 생성 실패:', errorDetails);
     
     // 에러 타입별 처리
-    if (error.message?.includes('API key')) {
+    if (error.message?.includes('API key') || error.message?.includes('401')) {
       return res.status(401).json({
         error: 'Invalid API key',
         message: error.message,
       });
     }
 
+    // 상세한 에러 정보 반환 (프로덕션에서도 일부 정보 제공)
     return res.status(500).json({
       error: 'Failed to create cache',
       message: error.message || 'Unknown error',
+      systemLogicLoaded: !!KBO_SYSTEM_LOGIC,
+      systemLogicLength: KBO_SYSTEM_LOGIC?.length || 0,
+      hint: !KBO_SYSTEM_LOGIC ? 'System Logic 파일이 로드되지 않았습니다. Vercel 배포 로그를 확인하세요.' : 'SDK API 문제일 수 있습니다. Vercel Functions 로그를 확인하세요.',
     });
   }
 }
