@@ -8,10 +8,18 @@
 - `API_OPTIMIZATION_REPORT_2025-12-01.md` - Google API 호출 최적화 진단 리포트
 - `FEATURE_STATUS_REPORT_2025-12-01.md` - 기능 상태 보고서
 - `PERFORMANCE_ANALYSIS_REPORT_2025-12-01.md` - 성능 분석 리포트
+- `TOKEN_OPTIMIZATION_ANALYSIS_2025-12-08.md` - 토큰 사용량 최적화 분석
+- `TOKEN_OPTIMIZATION_URGENT_FIX_2025-12-08.md` - 토큰 최적화 긴급 수정 보고서
 
 ### 보안 점검 보고서
 - `SECURITY_AUDIT_2025-12-08.md` - 일반 보안 감사 보고서
 - `SECURITY_AUDIT_REACT2SHELL_2025-12-08.md` - React2Shell 취약점 점검 보고서 (CVE-2025-55182, CVE-2025-66478)
+
+### 코드 검토 보고서
+- `CODE_REVIEW_CONTEXT_CACHING_2025-12-09.md` - Context Caching 구현 코드 검토
+
+### 버전 비교 보고서
+- `VERSION_COMPARISON_0b2b107_2025-12-08.md` - Git 버전 비교 보고서
 
 ## 📅 파일명 규칙
 

@@ -81,6 +81,22 @@ export default async function handler(
         errorData = { message: errorText };
       }
       
+      const errorMessage = errorData.error?.message || errorData.message || 'Unknown error';
+      
+      // 무료 티어 제한 에러인 경우 특별 처리
+      if (cacheResponse.status === 429 && errorMessage.includes('TotalCachedContentStorageTokensPerModelFreeTier')) {
+        console.warn('[Context Caching] ⚠️ 무료 티어 제한: Context Caching은 유료 플랜에서만 사용 가능합니다.');
+        console.warn('[Context Caching] 💡 Fallback: 기존 방식 사용 (System Instruction 매번 전송)');
+        
+        // 무료 티어 제한 에러를 명확하게 반환 (클라이언트에서 Fallback 처리)
+        return res.status(200).json({
+          success: false,
+          error: 'Free tier limit',
+          message: 'Context Caching은 무료 티어에서 사용할 수 없습니다. 유료 플랜이 필요합니다.',
+          fallback: true, // 클라이언트에서 기존 방식 사용하도록 안내
+        });
+      }
+      
       console.error('[Context Caching] REST API 호출 실패:', {
         status: cacheResponse.status,
         statusText: cacheResponse.statusText,
@@ -88,7 +104,7 @@ export default async function handler(
       });
       
       throw new Error(
-        `Failed to create cache via REST API: ${cacheResponse.status} - ${errorData.error?.message || errorData.message || 'Unknown error'}`
+        `Failed to create cache via REST API: ${cacheResponse.status} - ${errorMessage}`
       );
     }
 

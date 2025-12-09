@@ -47,6 +47,13 @@ async function createCacheOnServer(apiKey: string): Promise<string | null> {
 
     const data = await response.json();
     
+    // 무료 티어 제한인 경우 명확하게 처리
+    if (data.success === false && data.error === 'Free tier limit') {
+      console.warn('[Context Caching] ⚠️ 무료 티어 제한: Context Caching 사용 불가');
+      console.warn('[Context Caching] 💡 기존 방식 사용 (System Instruction 매번 전송)');
+      return null; // Fallback으로 기존 방식 사용
+    }
+    
     if (data.success && data.cacheId) {
       console.log(`[Context Caching] ✅ 서버에서 캐시 생성 성공: ${data.cacheId}`);
       console.log(`[Context Caching] 캐시 만료 시간: ${new Date(data.expiresAt).toLocaleString()}`);
