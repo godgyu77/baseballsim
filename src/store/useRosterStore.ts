@@ -5,7 +5,12 @@
  */
 
 import { create } from 'zustand';
-import { ROSTER_DATA, type TeamRoster, type Player } from '../data/RosterData';
+// 1. 타입(Type)과 파싱 함수는 기존 파일(RosterData)에서 가져옴
+import { type TeamRoster, type Player } from '../data/RosterData';
+
+// 2. 실제 데이터(ROSTER_DATA)는 방금 보여주신 InitialData 파일에서 가져와야 함
+import { ROSTER_DATA } from '../constants/prompts/InitialData'; 
+// (주의: InitialData.ts 파일의 위치에 따라 경로 '../data/InitialData'는 다를 수 있습니다.)
 
 interface RosterStore {
   // State

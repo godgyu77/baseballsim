@@ -31,7 +31,12 @@ import { getInitialBudget } from '../constants/GameConfig';
 import { Team } from '../constants/TeamData';
 import { KBO_INITIAL_DATA } from '../constants/prompts';
 import { getInitialRosterForTeam, getCompactAllRosters } from '../lib/rosterFormatter';
-import { getRosterFromInitialDataOnly } from '../lib/dataIntegrity';
+// 필요한 함수들을 모두 여기서 가져옵니다.
+import { 
+  getRosterFromInitialDataOnly, 
+  validateInitialDataIntegrity, 
+  validateTeamRosterIntegrity 
+} from '../lib/dataIntegrity';
 import { useRosterStore } from '../store/useRosterStore';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
@@ -1216,7 +1221,8 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       initializeData();
       
       // [FIX] 데이터 무결성 검증 (InitialData.ts가 유일한 데이터 소스임을 보장)
-      import('../lib/dataIntegrity').then(({ validateInitialDataIntegrity, validateTeamRosterIntegrity }) => {
+      // 동적 import 제거 후 직접 호출
+      try {
         const globalValidation = validateInitialDataIntegrity();
         if (!globalValidation.isValid) {
           console.error('[ChatInterface] ❌ 데이터 무결성 검증 실패:', globalValidation.errors);
@@ -1236,9 +1242,13 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
         }
         
         console.log(`[ChatInterface] ✅ 데이터 무결성 검증 완료: 팀 "${selectedTeam.fullName}"`);
-      }).catch((error) => {
-        console.error('[ChatInterface] 데이터 무결성 검증 모듈 로드 실패:', error);
-      });
+      } catch (error) {
+        console.error('[ChatInterface] 데이터 무결성 검증 중 오류 발생:', error);
+        // 검증 로직 자체 에러 시에도 중단 처리
+        isInitializingRef.current = false;
+        hasInitializedRef.current = true;
+        return;
+      }
       
       // [CRITICAL FIX] 이전 메시지 및 채팅 인스턴스 완전 초기화
       // 화면에 표시된 모든 메시지와 AI 응답을 제거하여 API 오류 방지

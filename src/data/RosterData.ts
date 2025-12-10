@@ -196,7 +196,7 @@ function parseBatterLine(line: string): Player | null {
   const [div, pos, hand, nameWithAge, con, gap, pow, eye, run, fld, stats, sal, ...noteParts] = parts;
   
   // 이름과 나이 추출 (예: "장성우(36)")
-  const nameMatch = nameWithAge.match(/(.+?)\((\d+)\)/);
+  const nameMatch = nameWithAge.match(/(.+?)\s*\((\d+)\)/);
   if (!nameMatch) return null;
   
   const name = nameMatch[1].trim();
@@ -253,30 +253,29 @@ export function formatRosterForPrompt(roster: TeamRoster): string {
     lines.push(line);
   }
   
-  lines.push('');
   lines.push('#### **[타자진]**');
+  // 헤더: DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE
   lines.push('DIV,POS,HAND,NAME,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,NOTE');
-  
+
   for (const batter of roster.batters) {
     const stats = (batter.stats as BatterStats);
     const line = [
       batter.division,
       batter.position,
       batter.hand,
-      `${batter.name}(${batter.age})`,
+      `${batter.name} (${batter.age})`, // [수정] 괄호 앞 띄어쓰기 추가
       stats.con,
       stats.gap,
       stats.pow,
       stats.eye,
       stats.run,
       stats.fld,
-      batter.note || '-',
-      '-',
-      '-',
+      '-', // STATS 컬럼 (비워둠)
+      '-', // SAL 컬럼 (비워둠)
+      batter.note || '', // [수정] NOTE 컬럼 위치 맞춤
     ].join(',');
     lines.push(line);
   }
   
   return lines.join('\n');
 }
-
