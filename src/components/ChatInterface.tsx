@@ -32,6 +32,7 @@ import { Team } from '../constants/TeamData';
 import { KBO_INITIAL_DATA } from '../constants/prompts';
 import { getInitialRosterForTeam, getCompactAllRosters } from '../lib/rosterFormatter';
 import { getRosterFromInitialDataOnly } from '../lib/dataIntegrity';
+import { useRosterStore } from '../store/useRosterStore';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
 import { createInitialFacilityState, FACILITY_DEFINITIONS } from '../constants/Facilities';
@@ -147,19 +148,28 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     // 신생 구단인 경우 구단 이름은 expansionTeamData에서 받은 값으로 고정 (절대 변경하지 않음)
     // AI 응답이나 사용자 메시지에서 구단명을 추출해도 업데이트하지 않음
     
-    // [DYNAMIC CONTEXT INJECTION] 동적 컨텍스트 주입
-    // 초기화 단계가 아니면 InitialData 제거하고 필요한 데이터만 주입
+    // [TOKEN OPTIMIZATION] Client-side RAG: 사용자 질문에 따라 관련 로스터 데이터만 주입
     const isInitialData = userMessage.includes('[SYSTEM STATUS: FIXED]') || 
                           userMessage.includes('KBO_INITIAL_DATA') ||
                           userMessage.length > 30000;
     
     let contextInjectedMessage = userMessage;
     
-    // 초기화가 아닌 경우 동적 컨텍스트 주입
+    // 초기화가 아닌 경우: Roster Store에서 관련 데이터만 필터링하여 주입
     if (!isInitialData && gamePhase !== 'TEAM_SELECTION') {
+      const { getRelevantContext } = useRosterStore.getState();
+      const relevantRosterData = getRelevantContext(userMessage);
+      
+      // 관련 로스터 데이터가 있으면 User Message 앞에 주입
+      if (relevantRosterData) {
+        contextInjectedMessage = `[Context Data based on User Request]\n${relevantRosterData}\n\n[User Question]\n${userMessage}`;
+        console.log(`[RosterStore] 관련 데이터 주입: ${relevantRosterData.length}자`);
+      }
+      
+      // 기존 동적 컨텍스트 주입 (게임 상태 등)
       const contextOptions: ContextInjectionOptions = {
         gamePhase,
-        userMessage,
+        userMessage: contextInjectedMessage, // 이미 로스터 데이터가 주입된 메시지 사용
         currentRoster: currentRoster.length > 0 ? currentRoster : undefined,
         teamBudget: gameState.budget || undefined,
         facilities: facilities,
@@ -167,7 +177,7 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
         transactionHistory: transactionHistory.length > 0 ? transactionHistory : undefined,
       };
       
-      contextInjectedMessage = injectDynamicContext(userMessage, contextOptions);
+      contextInjectedMessage = injectDynamicContext(contextInjectedMessage, contextOptions);
       console.log(`[Dynamic Context] 주입 전: ${userMessage.length}자 → 주입 후: ${contextInjectedMessage.length}자`);
     }
     
@@ -1200,6 +1210,10 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       // [FIX] 초기화 시작 전 즉시 플래그 설정 (StrictMode 이중 실행 방지)
       isInitializingRef.current = true;
       console.log('[ChatInterface] 게임 초기화 시작 (중복 실행 방지 플래그 설정)');
+      
+      // [TOKEN OPTIMIZATION] Roster Store 초기화 (Client-side RAG)
+      const { initializeData } = useRosterStore.getState();
+      initializeData();
       
       // [FIX] 데이터 무결성 검증 (InitialData.ts가 유일한 데이터 소스임을 보장)
       import('../lib/dataIntegrity').then(({ validateInitialDataIntegrity, validateTeamRosterIntegrity }) => {

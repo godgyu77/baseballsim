@@ -665,4 +665,8 @@ D,P,H,NM,CON,GAP,POW,EYE,RUN,FLD,STATS,SAL,N
 `;
 
 export const ROSTER_DATA: TeamRoster[] = parseRosterFromCSV(KBO_INITIAL_DATA_CSV);
+
+// [TOKEN OPTIMIZATION] KBO_INITIAL_DATA는 더 이상 export하지 않음
+// 대신 ROSTER_DATA를 사용하여 필요한 데이터만 동적으로 주입
+// 하위 호환성을 위해 임시로 유지 (향후 제거 예정)
 export const KBO_INITIAL_DATA = KBO_INITIAL_DATA_CSV;

@@ -346,10 +346,11 @@ export async function initializeGameWithData(
   // 초기 시설 레벨은 모두 1로 시작
   const initPromptText = generateInitPromptFromTeam(selectedTeam, difficulty);
   
-  // [TOKEN OPTIMIZATION] 선택된 팀의 로스터만 전송 (전체 로스터 제거)
+  // [TOKEN OPTIMIZATION] 초기화 시에만 선택된 팀의 로스터 전송
+  // 이후 요청에서는 Roster Store를 통해 필요한 데이터만 동적으로 주입
   const selectedTeamRoster = getInitialRosterForTeam(selectedTeam.fullName);
   
-  // Initial Data와 프롬프트 결합 (선택된 팀만)
+  // Initial Data와 프롬프트 결합 (초기화 시에만)
   const initPrompt = `${selectedTeamRoster}
 
 ${initPromptText}
