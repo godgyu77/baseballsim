@@ -1,4 +1,5 @@
 import { processNewsItems } from './newsUtils';
+import { ROSTER_DATA } from '../constants/prompts/InitialData';
 
 export interface ParsedMessage {
   text: string;
@@ -1018,35 +1019,19 @@ export function parseAIResponse(message: string): ParsedMessage {
     }
   }
 
-  // [Roster-Validation] 로스터 무결성 검사 추가 - [ROSTER] 태그 찾기 및 파싱
+  // [CRITICAL] AI 응답의 로스터는 절대 사용하지 않음
+  // InitialData.ts에서만 로스터를 가져오도록 변경
+  // [Roster-Validation] 로스터 무결성 검사 추가 - [ROSTER] 태그는 파싱하지 않음
   let roster: Player[] | undefined = undefined;
+  
+  // [CRITICAL] AI 응답의 [ROSTER] 태그는 무시
+  // 로스터는 InitialData.ts에서만 가져오므로 여기서는 파싱하지 않음
   const rosterRegex = /\[ROSTER:\s*(\[[\s\S]*?\])\]/gs;
   const rosterMatch = originalText.match(rosterRegex);
   
   if (rosterMatch) {
-    try {
-      const firstMatch = rosterMatch[0];
-      const jsonMatch = firstMatch.match(/\[ROSTER:\s*(\[[\s\S]*?\])\]/s);
-      if (jsonMatch && jsonMatch[1]) {
-        const rosterArray = JSON.parse(jsonMatch[1]);
-        if (Array.isArray(rosterArray)) {
-          roster = rosterArray.map((player: any) => ({
-            id: player.id || `${player.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            name: player.name || '',
-            position: player.position || '',
-            age: player.age,
-            division: player.division,
-            type: player.type,
-            stats: player.stats,
-            record: player.record,
-            salary: player.salary,
-            note: player.note,
-          }));
-        }
-      }
-    } catch (e) {
-      console.warn('[Roster-Validation] ROSTER 태그 파싱 오류:', e);
-    }
+    console.warn(`[Roster-Validation] ⚠️ AI 응답의 [ROSTER] 태그는 무시됩니다. InitialData.ts에서만 로스터를 가져옵니다.`);
+    // roster는 undefined로 유지 (사용하지 않음)
   }
 
   // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - <GAME_RESULTS> 태그 파싱

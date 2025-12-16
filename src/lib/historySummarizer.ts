@@ -63,29 +63,84 @@ export function summarizeHistoryWithPersona(
 }
 
 /**
- * [OPTIMIZE] 스마트 히스토리 압축
+ * [OPTIMIZE] 스마트 히스토리 압축 (강화 버전)
  * 중요 정보는 유지하고 불필요한 반복은 제거합니다.
+ * 각 메시지의 길이도 제한하여 토큰 사용량을 대폭 절감합니다.
  * 
  * @param history 전체 히스토리
- * @param maxRecentTurns 최근 유지할 대화 턴 수 (기본값: 15)
+ * @param maxRecentTurns 최근 유지할 대화 턴 수 (기본값: 3)
  * @returns 압축된 히스토리
  */
 export function compressHistory(
   history: HistoryMessage[],
-  maxRecentTurns: number = 15
+  maxRecentTurns: number = 3
 ): HistoryMessage[] {
-  if (history.length <= maxRecentTurns) {
+  if (history.length === 0) {
     return history;
   }
 
+  // [CRITICAL] 각 메시지 길이 제한 (3,000자)
+  const MAX_MESSAGE_LENGTH = 3000;
+  const lengthLimitedHistory = history.map(msg => {
+    const text = msg.parts[0]?.text || '';
+    
+    // Initial Data는 제외
+    if (text.includes('[INITIAL_DATA_PACK]') || 
+        text.includes('KBO_INITIAL_DATA') ||
+        text.length > 30000) {
+      return msg;
+    }
+    
+    if (text.length <= MAX_MESSAGE_LENGTH) {
+      return msg;
+    }
+    
+    // 앞부분만 유지 (중요한 태그는 보존)
+    let truncated = text.substring(0, MAX_MESSAGE_LENGTH);
+    
+    // STATUS, OPTIONS 등 중요한 태그가 잘렸는지 확인
+    const hasStatusTag = text.includes('[STATUS]');
+    const hasOptionsTag = text.includes('[OPTIONS]');
+    
+    if (hasStatusTag && !truncated.includes('[STATUS]')) {
+      // STATUS 태그를 찾아서 포함시키기
+      const statusMatch = text.match(/\[STATUS\][\s\S]*?\[STATUS\]/);
+      if (statusMatch) {
+        truncated = statusMatch[0] + '\n\n[메시지 길이 제한으로 일부 내용 생략]';
+      }
+    }
+    
+    if (hasOptionsTag && !truncated.includes('[OPTIONS]')) {
+      // OPTIONS 태그를 찾아서 포함시키기
+      const optionsMatch = text.match(/\[OPTIONS\][\s\S]*/);
+      if (optionsMatch) {
+        truncated = truncated + '\n\n' + optionsMatch[0];
+      }
+    }
+    
+    return {
+      role: msg.role,
+      parts: [{ text: truncated + `\n\n[메시지 길이 제한: 원본 ${text.length}자 중 ${MAX_MESSAGE_LENGTH}자만 표시]` }]
+    };
+  });
+
+  if (lengthLimitedHistory.length <= maxRecentTurns) {
+    return lengthLimitedHistory;
+  }
+
   // 최근 N개와 오래된 대화 분리
-  const recentHistory = history.slice(-maxRecentTurns);
-  const oldHistory = history.slice(0, -maxRecentTurns);
+  const recentHistory = lengthLimitedHistory.slice(-maxRecentTurns);
+  const oldHistory = lengthLimitedHistory.slice(0, -maxRecentTurns);
 
   // 오래된 대화 요약 (페르소나 유지)
   const summarized = summarizeHistoryWithPersona(oldHistory, recentHistory);
 
+  const originalLength = history.reduce((sum, msg) => sum + (msg.parts[0]?.text?.length || 0), 0);
+  const compressedLength = summarized.reduce((sum, msg) => sum + (msg.parts[0]?.text?.length || 0), 0);
+  const compressionRate = originalLength > 0 ? ((1 - compressedLength / originalLength) * 100).toFixed(1) : '0';
+
   console.log(`[History Compression] ${history.length}개 턴 → ${summarized.length}개 턴 (요약 적용)`);
+  console.log(`[History Compression] 압축률: ${compressionRate}% (${originalLength}자 → ${compressedLength}자)`);
 
   return summarized;
 }

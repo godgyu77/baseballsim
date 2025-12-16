@@ -22,6 +22,7 @@ import { isQuotaExceededError, getQuotaExceededMessage, getQuotaExceededAlertMes
 import { optimizeForTokenUsage } from '../lib/tokenOptimizer';
 import { compressHistory } from '../lib/historySummarizer';
 import { monitoringService, extractTokenUsageFromResponse } from '../lib/monitoring';
+import { injectDynamicContext, ContextInjectionOptions } from '../lib/contextInjector';
 import { debounce } from '../lib/debounce';
 import { SafeStorage, safeSetJSON, safeGetJSON } from '../lib/safeStorage';
 import { filterProtectedPlayers, validateDraftPicks, updatePlayerTeamAffiliation, sortDraftOrder, createDraftPool, DraftPlayer, ProtectedPlayer, TeamRank } from '../lib/draftUtils';
@@ -29,6 +30,14 @@ import { fetchFullRosterSequentially } from '../lib/rosterFetcher';
 import { getInitialBudget } from '../constants/GameConfig';
 import { Team } from '../constants/TeamData';
 import { KBO_INITIAL_DATA } from '../constants/prompts';
+import { getInitialRosterForTeam, getCompactAllRosters } from '../lib/rosterFormatter';
+// 필요한 함수들을 모두 여기서 가져옵니다.
+import { 
+  getRosterFromInitialDataOnly, 
+  validateInitialDataIntegrity, 
+  validateTeamRosterIntegrity 
+} from '../lib/dataIntegrity';
+import { useRosterStore } from '../store/useRosterStore';
 import { useSound } from '../hooks/useSound';
 import { RANDOM_EVENTS, RANDOM_EVENT_CHANCE } from '../constants/GameEvents';
 import { createInitialFacilityState, FACILITY_DEFINITIONS } from '../constants/Facilities';
@@ -144,31 +153,60 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
     // 신생 구단인 경우 구단 이름은 expansionTeamData에서 받은 값으로 고정 (절대 변경하지 않음)
     // AI 응답이나 사용자 메시지에서 구단명을 추출해도 업데이트하지 않음
     
-    // [OPTIMIZE] 사용자 입력 길이 제한 (토큰 절약)
-    // [FIX] 초기 데이터가 포함된 경우 최적화 건너뛰기
+    // [TOKEN OPTIMIZATION] Client-side RAG: 사용자 질문에 따라 관련 로스터 데이터만 주입
     const isInitialData = userMessage.includes('[SYSTEM STATUS: FIXED]') || 
                           userMessage.includes('KBO_INITIAL_DATA') ||
                           userMessage.length > 30000;
     
-    const { optimizedUserInput } = optimizeForTokenUsage([], userMessage, isInitialData);
+    let contextInjectedMessage = userMessage;
+    
+    // 초기화가 아닌 경우: Roster Store에서 관련 데이터만 필터링하여 주입
+    if (!isInitialData && gamePhase !== 'TEAM_SELECTION') {
+      const { getRelevantContext } = useRosterStore.getState();
+      const relevantRosterData = getRelevantContext(userMessage);
+      
+      // 관련 로스터 데이터가 있으면 User Message 앞에 주입
+      if (relevantRosterData) {
+        contextInjectedMessage = `[Context Data based on User Request]\n${relevantRosterData}\n\n[User Question]\n${userMessage}`;
+        console.log(`[RosterStore] 관련 데이터 주입: ${relevantRosterData.length}자`);
+      }
+      
+      // 기존 동적 컨텍스트 주입 (게임 상태 등)
+      const contextOptions: ContextInjectionOptions = {
+        gamePhase,
+        userMessage: contextInjectedMessage, // 이미 로스터 데이터가 주입된 메시지 사용
+        currentRoster: currentRoster.length > 0 ? currentRoster : undefined,
+        teamBudget: gameState.budget || undefined,
+        facilities: facilities,
+        leagueStandings: Object.keys(leagueStandings).length > 0 ? leagueStandings : undefined,
+        transactionHistory: transactionHistory.length > 0 ? transactionHistory : undefined,
+      };
+      
+      contextInjectedMessage = injectDynamicContext(contextInjectedMessage, contextOptions);
+      console.log(`[Dynamic Context] 주입 전: ${userMessage.length}자 → 주입 후: ${contextInjectedMessage.length}자`);
+    }
+    
+    // [OPTIMIZE] 사용자 입력 길이 제한 (토큰 절약)
+    const { optimizedUserInput } = optimizeForTokenUsage([], contextInjectedMessage, isInitialData);
     const optimizedMessage = optimizedUserInput;
     
     // 사용자 메시지를 화면에 추가 (hideFromUI가 false인 경우만)
     // 화면에는 원본 메시지 표시 (사용자 경험 유지)
-    // [4K 최적화] 메시지 개수 제한 (최대 150개 유지)
+    // [TOKEN OPTIMIZATION] 메시지 개수 제한 (최대 50개 유지, 150 → 50으로 축소)
     if (!hideFromUI) {
       setMessages((prev) => {
         const newMessages = [...prev, { text: displayMessage, isUser: true }];
-        return newMessages.length > 150 ? newMessages.slice(-150) : newMessages;
+        return newMessages.length > 50 ? newMessages.slice(-50) : newMessages;
       });
     }
     
     // messagesRef 업데이트 (API 히스토리 생성을 위해 실제 전송할 메시지 저장)
-    // 최적화된 메시지를 저장하여 다음 API 호출 시 토큰 절약
+    // [TOKEN OPTIMIZATION] 최적화된 메시지를 저장하여 다음 API 호출 시 토큰 절약
     // hideFromUI가 true여도 API 히스토리를 위해 messagesRef에는 실제 메시지 저장
     messagesRef.current = [...messagesRef.current, { text: optimizedMessage, isUser: true }];
-    if (messagesRef.current.length > 150) {
-      messagesRef.current = messagesRef.current.slice(-150);
+    // [TOKEN OPTIMIZATION] 150 → 50으로 축소 (약 67% 절감)
+    if (messagesRef.current.length > 50) {
+      messagesRef.current = messagesRef.current.slice(-50);
     }
     
     // [UX Optimization] 로딩 오버레이 제거 - 스트리밍 텍스트가 자연스럽게 나타나도록
@@ -213,7 +251,10 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           ? history.slice(1) // 첫 번째 model 메시지 제거
           : history;
 
-        // [OPTIMIZE] 토큰 절약을 위한 스마트 압축 적용
+        // [TOKEN OPTIMIZATION] 압축 전 원본 히스토리 저장 (모니터링용)
+        const originalHistoryBeforeCompression = [...safeHistory];
+
+        // [TOKEN OPTIMIZATION] 토큰 절약을 위한 스마트 압축 적용
         // [FIX] 초기 데이터가 포함된 경우 최적화 건너뛰기
         const isInitialData = optimizedMessage.includes('[SYSTEM STATUS: FIXED]') || 
                               optimizedMessage.includes('KBO_INITIAL_DATA') ||
@@ -224,7 +265,16 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           // 1. 히스토리 정리 (메타데이터 제거)
           const { optimizedHistory } = optimizeForTokenUsage(safeHistory, '', false);
           // 2. 스마트 압축 (오래된 대화 요약 + 최근 대화 유지, 페르소나 보존)
-          finalSafeHistory = compressHistory(optimizedHistory, 15);
+          // [TOKEN OPTIMIZATION] 6 → 3으로 추가 축소 (약 80% 절감)
+          finalSafeHistory = compressHistory(optimizedHistory, 3);
+          
+          // 3. [TOKEN OPTIMIZATION] Initial Data 포함 메시지 제거 (초기화 후에는 불필요)
+          finalSafeHistory = finalSafeHistory.filter(msg => {
+            const text = msg.parts[0]?.text || '';
+            return !text.includes('[INITIAL_DATA_PACK]') && 
+                   !text.includes('KBO_INITIAL_DATA') &&
+                   !text.includes('[SYSTEM STATUS: FIXED]');
+          });
         } else {
           console.log('[TokenOptimizer] 초기 데이터 프롬프트: 히스토리 최적화 건너뛰기');
         }
@@ -234,8 +284,9 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
         });
         console.log('[handleSend] 채팅 인스턴스 생성 완료');
         
-        // [FIX] 모니터링을 위해 safeHistory를 상위 스코프에 저장
+        // [TOKEN OPTIMIZATION] 모니터링을 위해 압축 전/후 히스토리 저장
         (chatInstanceRef.current as any)._safeHistory = finalSafeHistory;
+        (chatInstanceRef.current as any)._originalHistory = originalHistoryBeforeCompression;
       }
 
       // [OPTIMIZE] 사용자 입력은 이미 위에서 최적화되었으므로 그대로 사용
@@ -350,20 +401,29 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
             const inputTokens = usageMetadata.promptTokenCount || 0;
             const outputTokens = usageMetadata.candidatesTokenCount || 0;
             
-            // [FIX] safeHistory 변수 참조 수정
+            // [TOKEN OPTIMIZATION] 압축 전/후 길이 제대로 추적
             const currentHistory = (chatInstanceRef.current as any)?._safeHistory || [];
-            const originalHistoryLength = currentHistory.length;
-            const compressedHistoryLength = currentHistory.length; // 압축 후 길이
+            const originalHistory = (chatInstanceRef.current as any)?._originalHistory || currentHistory;
+            
+            // 문자 수 기준으로 압축률 계산
+            const originalLength = originalHistory.reduce((sum: number, msg: any) => 
+              sum + (msg.parts?.[0]?.text?.length || 0), 0);
+            const compressedLength = currentHistory.reduce((sum: number, msg: any) => 
+              sum + (msg.parts?.[0]?.text?.length || 0), 0);
             
             monitoringService.recordTokenUsage(
               inputTokens,
               outputTokens,
-              originalHistoryLength,
-              compressedHistoryLength
+              originalLength, // 문자 수 기준
+              compressedLength // 압축 후 문자 수
             );
             
-            // [FIX] 토큰 사용량 로그 출력
-            console.log(`💰 [Estimated Tokens] Input=${inputTokens}, Output=${outputTokens}`);
+            // [TOKEN OPTIMIZATION] 토큰 사용량 및 압축률 로그 출력
+            const compressionRate = originalLength > 0 
+              ? ((1 - compressedLength / originalLength) * 100).toFixed(1) 
+              : '0';
+            console.log(`💰 [Token Usage] Input=${inputTokens}, Output=${outputTokens}, Total=${inputTokens + outputTokens}`);
+            console.log(`📊 [Compression] ${originalLength}자 → ${compressedLength}자 (${compressionRate}% 압축)`);
           }
         } catch (monitoringError) {
           // 모니터링 오류는 무시 (게임 진행에 영향 없음)
@@ -542,65 +602,17 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
           }
 
           // [Roster-Validation] 로스터 무결성 검사 추가
-          // [ROSTER] 태그에서 로스터 데이터가 있는 경우 검증 및 업데이트
-          if (parsed.roster && Array.isArray(parsed.roster) && parsed.roster.length > 0) {
-            // 초기 로스터 출력 시 InitialData.ts와 비교 검증 (currentRoster가 비어있을 때만)
-            const isInitialRoster = currentRoster.length === 0;
-            // InitialData.ts의 팀 이름 형식과 매칭 (예: "한화 이글스", "KT 위즈" 등)
-            const teamNameForValidation = selectedTeam.fullName; // "한화 이글스", "KT 위즈" 등
-            const initialDataPlayerNames = isInitialRoster 
-              ? extractPlayerNamesFromInitialData(KBO_INITIAL_DATA, teamNameForValidation)
-              : undefined;
-            
-            // 로스터 무결성 검증
-            const validation = validateRosterIntegrity(
-              parsed.roster, 
-              currentRoster,
-              initialDataPlayerNames
-            );
-            
-            if (!validation.isValid) {
-              // [FIX] 로스터 데이터 잘림 감지 및 처리
-              const isTruncated = validation.isTruncated === true;
-              
-              if (isTruncated) {
-                // 로스터 데이터가 잘린 경우: 심각한 오류로 처리
-                console.error('⚠️ [Roster Truncated!] 로스터 데이터가 잘렸습니다. 로스터 업데이트를 건너뜁니다.');
-                console.error('[Roster-Validation] 잘림 감지 사유:');
-                validation.errors.forEach((error, index) => {
-                  console.error(`  ${index + 1}. ${error}`);
-                });
-                
-                // [TODO] 향후 재요청 로직 구현 가능
-                // 예: handleSend("로스터 데이터가 잘렸습니다. 타자진 데이터만 다시 생성해주세요.", { hideFromUI: true });
-                
-                // 기존 로스터 상태 유지 (업데이트 방지)
-              } else {
-                // 다른 검증 실패: 경고 로그 출력 및 기존 로스터 유지 (Fail-Safe)
-                console.error('[Roster-Validation] AI 데이터 오류 감지: 로스터 업데이트를 건너뜁니다.');
-                console.error('[Roster-Validation] 검증 실패 사유:');
-                validation.errors.forEach((error, index) => {
-                  console.error(`  ${index + 1}. ${error}`);
-                });
-                if (validation.warnings.length > 0) {
-                  console.warn('[Roster-Validation] 경고 사항:');
-                  validation.warnings.forEach((warning, index) => {
-                    console.warn(`  ${index + 1}. ${warning}`);
-                  });
-                }
-                // 기존 로스터 상태 유지 (업데이트 방지)
-              }
-            } else {
-              // 검증 성공: 로스터 업데이트
-              if (validation.warnings.length > 0) {
-                console.warn('[Roster-Validation] 경고 사항 (업데이트는 진행):');
-                validation.warnings.forEach((warning, index) => {
-                  console.warn(`  ${index + 1}. ${warning}`);
-                });
-              }
-              setCurrentRoster(parsed.roster);
-              console.log(`[Roster-Validation] ✅ 로스터 업데이트 완료: ${parsed.roster.length}명`);
-            }
+          // [CRITICAL] AI 응답의 로스터는 완전히 무시
+          // InitialData.ts에서만 로스터를 가져오므로, AI 응답의 parsed.roster는 사용하지 않음
+          // 초기 로스터가 비어있을 때만 InitialData.ts에서 로드
+          if (currentRoster.length === 0) {
+            console.log(`[ChatInterface] 📍 setCurrentRoster 호출 위치: 초기 로스터 로드 (line ~590)`);
+            console.log(`[ChatInterface] 📍 selectedTeam.fullName: "${selectedTeam.fullName}"`);
+            console.log(`[Roster-Validation] 초기 로스터 로드: InitialData.ts에서 직접 가져오기`);
+            const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
+            console.log(`[ChatInterface] 📍 로드된 로스터 선수 수: ${rosterFromInitialData.length}명`);
+            setCurrentRoster(rosterFromInitialData);
+            console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
           }
 
           // GUI_EVENT에서 로스터 데이터가 있는 경우 검증 (향후 확장용)
@@ -1048,10 +1060,12 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
                 if (parsed.transactionHistory && Array.isArray(parsed.transactionHistory)) {
                   setTransactionHistory(parsed.transactionHistory);
                 }
+                // [CRITICAL] 저장된 로스터를 무시하고 InitialData.ts에서만 가져오기
                 // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
-                if (parsed.currentRoster && Array.isArray(parsed.currentRoster)) {
-                  setCurrentRoster(parsed.currentRoster);
-                }
+                console.warn(`[Data Integrity] ⚠️ 저장된 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
+                const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
+                setCurrentRoster(rosterFromInitialData);
+                console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
                 // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
                 if (parsed.leagueStandings && typeof parsed.leagueStandings === 'object') {
                   setLeagueStandings(parsed.leagueStandings);
@@ -1202,6 +1216,40 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       isInitializingRef.current = true;
       console.log('[ChatInterface] 게임 초기화 시작 (중복 실행 방지 플래그 설정)');
       
+      // [TOKEN OPTIMIZATION] Roster Store 초기화 (Client-side RAG)
+      const { initializeData } = useRosterStore.getState();
+      initializeData();
+      
+      // [FIX] 데이터 무결성 검증 (InitialData.ts가 유일한 데이터 소스임을 보장)
+      // 동적 import 제거 후 직접 호출
+      try {
+        const globalValidation = validateInitialDataIntegrity();
+        if (!globalValidation.isValid) {
+          console.error('[ChatInterface] ❌ 데이터 무결성 검증 실패:', globalValidation.errors);
+          alert(`데이터 무결성 검증 실패:\n${globalValidation.errors.join('\n')}\n\n게임을 시작할 수 없습니다.`);
+          isInitializingRef.current = false;
+          hasInitializedRef.current = true;
+          return;
+        }
+        
+        const teamValidation = validateTeamRosterIntegrity(selectedTeam.fullName);
+        if (!teamValidation.isValid) {
+          console.error(`[ChatInterface] ❌ 팀 "${selectedTeam.fullName}" 데이터 검증 실패:`, teamValidation.errors);
+          alert(`팀 데이터 검증 실패:\n${teamValidation.errors.join('\n')}\n\n게임을 시작할 수 없습니다.`);
+          isInitializingRef.current = false;
+          hasInitializedRef.current = true;
+          return;
+        }
+        
+        console.log(`[ChatInterface] ✅ 데이터 무결성 검증 완료: 팀 "${selectedTeam.fullName}"`);
+      } catch (error) {
+        console.error('[ChatInterface] 데이터 무결성 검증 중 오류 발생:', error);
+        // 검증 로직 자체 에러 시에도 중단 처리
+        isInitializingRef.current = false;
+        hasInitializedRef.current = true;
+        return;
+      }
+      
       // [CRITICAL FIX] 이전 메시지 및 채팅 인스턴스 완전 초기화
       // 화면에 표시된 모든 메시지와 AI 응답을 제거하여 API 오류 방지
       setMessages([]);
@@ -1230,12 +1278,14 @@ export default function ChatInterface({ apiKey, selectedTeam, difficulty, expans
       
       // 2단계: 팀 정보를 포함한 프롬프트 생성 및 전송
       if (selectedTeam.id === 'expansion') {
-        const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
+        const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : difficulty === 'HARD' ? '하드 모드' : '헬 모드';
         const difficultyCode = difficulty;
         const difficultyConfig = difficulty === 'EASY' 
           ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
           : difficulty === 'NORMAL'
           ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
+          : difficulty === 'HARD'
+          ? '초기 자금: 20.0억 원, 샐러리캡: 120억 원'
           : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
         
         const ownerTypeName = expansionTeamData?.ownerType === 'A' 
@@ -1272,6 +1322,9 @@ ${facilityInfo}`;
         
         // InitialData를 포함한 전체 프롬프트 생성
         // [FIX] 프롬프트 최상단에 강제 주입하여 AI가 먼저 인식하도록 함
+        // [TOKEN OPTIMIZATION] 신생 구단은 로스터가 없으므로 전체 로스터 요약만 전송
+        const allRostersSummary = getCompactAllRosters();
+        
         const fullPromptWithData = `[SYSTEM STATUS: FIXED]
 - User Selected Team: ${expansionTeamData?.teamName || '신생 구단'} (Confirmed)
 - Difficulty: ${difficultyCode} (${difficultyMode}) (Confirmed)
@@ -1282,7 +1335,7 @@ ${facilityInfo}`;
 🚫 DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or "운영 난이도를 선택해주세요"
 ✅ IMMEDIATELY start the game with <STATUS> and <NEWS> tags.
 
-${KBO_INITIAL_DATA}
+${allRostersSummary}
 
 ${fullPrompt}
 
@@ -1413,7 +1466,7 @@ ${fullPrompt}
         console.log('📋 [State] selectedTeam.fullName:', selectedTeam?.fullName);
         console.log('📋 [State] difficulty:', difficulty);
         
-        const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : '헬 모드';
+        const difficultyMode = difficulty === 'EASY' ? '이지 모드' : difficulty === 'NORMAL' ? '노말 모드' : difficulty === 'HARD' ? '하드 모드' : '헬 모드';
         const difficultyCode = difficulty;
         
         // 🚀 [DEBUG] 난이도 변환 확인
@@ -1423,6 +1476,8 @@ ${fullPrompt}
           ? '초기 자금: 80.0억 원, 샐러리캡: 250억 원'
           : difficulty === 'NORMAL'
           ? '초기 자금: 30.0억 원, 샐러리캡: 137억 원'
+          : difficulty === 'HARD'
+          ? '초기 자금: 20.0억 원, 샐러리캡: 120억 원'
           : '초기 자금: 10.0억 원, 샐러리캡: 100억 원';
         
         const facilityInfo = `**[현재 시설 레벨]**
@@ -1444,8 +1499,10 @@ ${difficultyConfig}
 
 ${facilityInfo}`;
         
-        // InitialData를 포함한 전체 프롬프트 생성
-        // [FIX] 프롬프트 최상단에 강제 주입하여 AI가 먼저 인식하도록 함
+        // [TOKEN OPTIMIZATION] 초기화 시 선택된 팀의 로스터만 전송 (전체 로스터 제거)
+        // 전체 10개 팀 로스터(33,000자) 대신 선택된 팀만 전송하여 토큰 절감
+        const selectedTeamRoster = getInitialRosterForTeam(selectedTeam.fullName);
+        
         const fullPromptWithData = `[SYSTEM STATUS: FIXED]
 - User Selected Team: ${selectedTeam.fullName} (Confirmed)
 - Difficulty: ${difficultyCode} (${difficultyMode}) (Confirmed)
@@ -1456,7 +1513,7 @@ ${facilityInfo}`;
 🚫 DO NOT ask "어떤 난이도로 시작하시겠습니까?" or "난이도를 선택해주세요" or "운영 난이도를 선택해주세요"
 ✅ IMMEDIATELY start the game with <STATUS> and <NEWS> tags.
 
-${KBO_INITIAL_DATA}
+${selectedTeamRoster}
 
 ${fullPrompt}
 
@@ -2034,10 +2091,12 @@ ${definition.effect(result.newLevel).description}
             if (data.transactionHistory && Array.isArray(data.transactionHistory)) {
               setTransactionHistory(data.transactionHistory);
             }
+            // [CRITICAL] 저장된 로스터를 무시하고 InitialData.ts에서만 가져오기
             // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
-            if (data.currentRoster && Array.isArray(data.currentRoster)) {
-              setCurrentRoster(data.currentRoster);
-            }
+            console.warn(`[Data Integrity] ⚠️ 저장된 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
+            const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
+            setCurrentRoster(rosterFromInitialData);
+            console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
             // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
             if (data.leagueStandings && typeof data.leagueStandings === 'object') {
               setLeagueStandings(data.leagueStandings);
@@ -2159,10 +2218,12 @@ ${definition.effect(result.newLevel).description}
       if (data.transactionHistory && Array.isArray(data.transactionHistory)) {
         setTransactionHistory(data.transactionHistory);
       }
+      // [CRITICAL] 저장된 로스터를 무시하고 InitialData.ts에서만 가져오기
       // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
-      if (data.currentRoster && Array.isArray(data.currentRoster)) {
-        setCurrentRoster(data.currentRoster);
-      }
+      console.warn(`[Data Integrity] ⚠️ 저장된 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
+      const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
+      setCurrentRoster(rosterFromInitialData);
+      console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
       // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
       if (data.leagueStandings && typeof data.leagueStandings === 'object') {
         setLeagueStandings(data.leagueStandings);
@@ -2375,10 +2436,12 @@ ${definition.effect(result.newLevel).description}
       if (parsed.transactionHistory && Array.isArray(parsed.transactionHistory)) {
         setTransactionHistory(parsed.transactionHistory);
       }
+      // [CRITICAL] 저장된 로스터를 무시하고 InitialData.ts에서만 가져오기
       // [Roster-Validation] 로스터 무결성 검사 추가 - 로스터 복원
-      if (parsed.currentRoster && Array.isArray(parsed.currentRoster)) {
-        setCurrentRoster(parsed.currentRoster);
-      }
+      console.warn(`[Data Integrity] ⚠️ 저장된 로스터는 무시하고 InitialData.ts에서 직접 로드합니다.`);
+      const rosterFromInitialData = getRosterFromInitialDataOnly(selectedTeam.fullName);
+      setCurrentRoster(rosterFromInitialData);
+      console.log(`[Roster-Validation] ✅ InitialData.ts에서 직접 로스터 로드 완료: ${rosterFromInitialData.length}명`);
       // [Sim-Engine] 경기 결과 파싱 및 전적 반영 - 리그 순위표 복원
       if (parsed.leagueStandings && typeof parsed.leagueStandings === 'object') {
         setLeagueStandings(parsed.leagueStandings);
@@ -2616,12 +2679,12 @@ ${definition.effect(result.newLevel).description}
       </div>
 
       {/* 푸터 - 입력 영역 */}
-      <div className="flex-none border-t-2 border-baseball-green/20 bg-gradient-to-b from-gray-50 to-white shadow-2xl z-40 pb-[env(safe-area-inset-bottom)] mobile-input-container">
+      <div className="flex-none border-t-2 border-baseball-green/20 bg-gradient-to-b from-gray-50 to-white shadow-2xl z-40 pb-[env(safe-area-inset-bottom)] mobile-input-container safe-area-bottom">
         {/* 선택지 버튼 패널 제거됨 - 모달로 대체 */}
 
         {/* 입력 폼 */}
         <form onSubmit={handleSubmit} className="p-2 sm:p-3 md:p-4">
-          <div className="flex gap-2 sm:gap-3 max-w-5xl mx-auto">
+          <div className="flex gap-2 sm:gap-3 max-w-5xl mx-auto items-center">
             {/* 지시사항, 뉴스 및 시설 관리 버튼 */}
             <div className="flex items-center gap-1 sm:gap-1.5 border-r border-baseball-green/20 pr-1.5 sm:pr-2 md:pr-3 flex-shrink-0">
               <button
@@ -2666,7 +2729,7 @@ ${definition.effect(result.newLevel).description}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="명령을 입력하세요..."
-              className="flex-1 px-3 sm:px-4 md:px-5 py-3 sm:py-3.5 text-base sm:text-base border-2 border-baseball-green/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green/50 focus:border-baseball-green disabled:bg-gray-100 font-sans shadow-sm focus:shadow-md transition-all touch-manipulation min-h-[44px] mobile-input"
+              className="flex-1 px-3 sm:px-4 md:px-5 py-3 sm:py-3.5 text-base sm:text-base border-2 border-baseball-green/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-baseball-green/50 focus:border-baseball-green disabled:bg-gray-100 font-sans shadow-sm focus:shadow-md transition-all touch-manipulation min-h-[44px] mobile-input min-w-0"
               disabled={isLoading}
               autoComplete="off"
               autoCorrect="off"

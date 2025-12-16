@@ -61,6 +61,50 @@ button, a {
   }
 }
 
+/* 모바일 입력 컨테이너 최적화 */
+.mobile-input-container {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+@media screen and (max-width: 768px) {
+  .mobile-input-container {
+    padding-bottom: max(env(safe-area-inset-bottom), 8px);
+    /* 키보드가 올라올 때도 입력 필드가 보이도록 */
+    position: sticky;
+    bottom: 0;
+    z-index: 40;
+  }
+  
+  .mobile-input {
+    /* 입력 필드가 잘리지 않도록 */
+    max-width: 100%;
+    box-sizing: border-box;
+    width: 100%;
+  }
+  
+  /* 입력 폼 내부 flex 레이아웃 최적화 */
+  .mobile-input-container form {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  
+  .mobile-input-container form > div {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+}
+
+/* Safe area bottom 추가 여백 */
+.safe-area-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom), 8px);
+}
+
 /* 모바일 스크롤 최적화 및 전역 스타일 조정 */
 @media (max-width: 768px) {
   html {

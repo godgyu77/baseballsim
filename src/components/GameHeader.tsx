@@ -53,9 +53,11 @@ export default function GameHeader({
                     ? 'bg-green-500 text-white' 
                     : difficulty === 'NORMAL'
                     ? 'bg-blue-500 text-white'
+                    : difficulty === 'HARD'
+                    ? 'bg-orange-500 text-white'
                     : 'bg-red-600 text-white'
                 }`}>
-                  {difficulty === 'EASY' ? '이지' : difficulty === 'NORMAL' ? '노말' : '헬'}
+                  {difficulty === 'EASY' ? '이지' : difficulty === 'NORMAL' ? '노말' : difficulty === 'HARD' ? '하드' : '헬'}
                 </span>
               </>
             )}

@@ -47,6 +47,9 @@ export function isNFSPlayer(
   const playerName = player.name.toLowerCase().trim();
 
   // 1. 프랜차이즈 스타 체크 (주요 팀의 상징적 선수)
+  // [NOTE] 이 목록은 NFS(Not For Sale) 필터링용이며, InitialData.ts의 로스터 데이터와는 무관합니다.
+  // 이 선수들은 트레이드 제안에서 자동으로 제외되지만, InitialData.ts에 없는 선수(예: 이정후, 김하성)는
+  // 게임 로스터에 포함되지 않습니다. 이는 의도된 동작입니다.
   const franchiseStars = [
     '임찬규', '박동원', '문보경', '홍창기', '박해민', '오지환', '김현수',
     '양의지', '김도영', '이정후', '강백호', '이정훈', '최정', '김하성'
