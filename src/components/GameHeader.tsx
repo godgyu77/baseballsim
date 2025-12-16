@@ -1,4 +1,4 @@
-import { Calendar, DollarSign, Building2, Trophy, KeyRound, Database, Receipt, MonitorPlay, BarChart3 } from 'lucide-react';
+import { Calendar, DollarSign, Building2, Trophy, KeyRound, Database, Receipt, MonitorPlay, BarChart3, LogOut, Zap } from 'lucide-react';
 import { Difficulty } from '../constants/GameConfig';
 import { getTeamNickname } from '../lib/utils';
 
@@ -11,10 +11,12 @@ interface GameHeaderProps {
   salaryCapUsage?: number; // 샐러리캡 소진율 (0.0 ~ 100.0)
   onApiKeyClick?: () => void;
   onSaveLoadClick?: () => void;
+  onTokenUsageClick?: () => void;
   onStandingsClick?: () => void;
   onTransactionClick?: () => void;
   onResultClick?: () => void;
   onMonitoringClick?: () => void;
+  onLogout?: () => void; // 로그아웃 핸들러
 }
 
 export default function GameHeader({ 
@@ -26,10 +28,12 @@ export default function GameHeader({
   salaryCapUsage,
   onApiKeyClick,
   onSaveLoadClick,
+  onTokenUsageClick,
   onStandingsClick,
   onTransactionClick,
   onResultClick,
-  onMonitoringClick
+  onMonitoringClick,
+  onLogout
 }: GameHeaderProps) {
   // budget이 null이거나 0이면 "시즌 준비 중" 표시
   const displayBudget = (budget !== null && budget > 0) ? budget.toLocaleString('ko-KR') + '원' : '시즌 준비 중';
@@ -118,8 +122,8 @@ export default function GameHeader({
           
           {/* 오른쪽: 버튼 및 정보 (모바일에서는 자금 정보 제거) */}
           <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 lg:gap-4 flex-shrink-0">
-            {/* 저장/불러오기 및 API 키 설정 버튼 */}
-            {(onSaveLoadClick || onApiKeyClick) && (
+            {/* 저장/불러오기, 토큰 사용량, API 키 설정, 로그아웃 버튼 */}
+            {(onSaveLoadClick || onTokenUsageClick || onApiKeyClick || onLogout) && (
               <div className="flex items-center gap-0.5 sm:gap-1 md:gap-2 border-r border-baseball-gold/40 pr-0.5 sm:pr-1 md:pr-2 lg:pr-4">
                 {onSaveLoadClick && (
                   <button
@@ -130,6 +134,15 @@ export default function GameHeader({
                     <Database className="w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5 text-baseball-gold" />
                   </button>
                 )}
+                {onTokenUsageClick && (
+                  <button
+                    onClick={onTokenUsageClick}
+                    className="p-1.5 sm:p-1.5 md:p-2 hover:bg-white/10 rounded transition-colors touch-manipulation min-w-[36px] min-h-[36px] sm:min-w-[40px] sm:min-h-[40px] flex items-center justify-center"
+                    title="토큰 사용량"
+                  >
+                    <Zap className="w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5 text-baseball-gold" />
+                  </button>
+                )}
                 {onApiKeyClick && (
                   <button
                     onClick={onApiKeyClick}
@@ -137,6 +150,15 @@ export default function GameHeader({
                     title="API 키 설정"
                   >
                     <KeyRound className="w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5 text-baseball-gold" />
+                  </button>
+                )}
+                {onLogout && (
+                  <button
+                    onClick={onLogout}
+                    className="p-1.5 sm:p-1.5 md:p-2 hover:bg-white/10 rounded transition-colors touch-manipulation min-w-[36px] min-h-[36px] sm:min-w-[40px] sm:min-h-[40px] flex items-center justify-center"
+                    title="로그아웃"
+                  >
+                    <LogOut className="w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5 text-baseball-gold" />
                   </button>
                 )}
               </div>

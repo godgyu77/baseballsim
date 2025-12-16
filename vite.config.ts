@@ -10,6 +10,15 @@ export default defineConfig({
     // 의존성 최적화 문제 해결을 위한 설정
     force: true, // 강제로 재최적화
     exclude: [], // 문제가 되는 패키지가 있으면 여기에 추가
+    include: [
+      '@ai-sdk/react',
+      '@ai-sdk/google',
+    ],
+    esbuildOptions: {
+      // ESM 패키지 해석을 위한 설정
+      mainFields: ['module', 'main'],
+      resolveExtensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json'],
+    },
   },
   build: {
     rollupOptions: {

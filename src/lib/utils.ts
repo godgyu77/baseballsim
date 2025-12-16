@@ -863,6 +863,15 @@ function removeSystemTags(text: string): string {
  * @returns 파싱된 텍스트와 옵션 배열
  */
 export function parseAIResponse(message: string): ParsedMessage {
+  // message가 undefined나 null일 때 안전하게 처리
+  if (!message || typeof message !== 'string') {
+    return {
+      text: '',
+      options: [],
+      guiEvent: undefined,
+    };
+  }
+
   const originalText = message;
   let options: Array<{ label: string; value: string }> = [];
   let guiEvent: GUIEvent | undefined = undefined;

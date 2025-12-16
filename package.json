@@ -9,15 +9,19 @@
     "preview": "vite preview",
     "prebuild": "node scripts/copy-system-logic.js",
     "seed": "tsx src/scripts/seedDatabase.ts",
+    "seed:retired": "tsx src/scripts/seedRetiredNumbers.ts",
+    "verify": "tsx src/scripts/verifyData.ts",
     "update-salaries:1": "tsx src/scripts/updateSalaries.ts 1",
     "update-salaries:2": "tsx src/scripts/updateSalaries.ts 2",
     "update-salaries:3": "tsx src/scripts/updateSalaries.ts 3"
   },
   "dependencies": {
+    "@ai-sdk/google": "^2.0.47",
+    "@ai-sdk/react": "^2.0.115",
     "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "^2.87.3",
     "@tanstack/react-query": "^5.90.12",
-    "@vercel/node": "^3.0.0",
+    "ai": "^5.0.113",
     "framer-motion": "^12.23.24",
     "idb": "^8.0.3",
     "lucide-react": "^0.344.0",
@@ -28,6 +32,7 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@types/node": "^20.11.0",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react": "^4.2.1",

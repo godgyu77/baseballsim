@@ -1,120 +1,247 @@
-/**
- * [Save/Load] 게임 데이터 저장/불러오기 모달
- * 파일 저장과 브라우저 저장을 선택할 수 있는 UI
- */
+'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Download, HardDrive, Upload, FolderOpen, Calendar, AlertCircle } from 'lucide-react';
-import { useSaveLoad } from '../hooks/useSaveLoad';
-import { GameSaveData } from '../services/StorageService';
+import { X, Save, FolderOpen, Loader2, AlertCircle, Calendar, Trophy } from 'lucide-react';
+import { GameService } from '../services/GameService';
+import { supabase } from '../lib/supabase';
+import { useToast } from '../context/ToastContext';
+
+interface SavedGame {
+  teamCode: string;
+  teamName: string;
+  difficulty: string;
+  currentYear: number;
+  currentMonth: number;
+  currentWeek: number;
+  budget: number;
+  savedAt: string;
+}
 
 interface SaveLoadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onLoad: (data: GameSaveData) => void;
-  getSaveData: () => GameSaveData;
+  teamCode: string;
+  teamName?: string;
+  difficulty?: string;
+  messages: any[];
+  onLoadGame: (gameData: { teamCode: string; teamName: string; difficulty: string; messages: any[] }) => void;
 }
 
-type TabType = 'save' | 'load';
+export default function SaveLoadModal({
+  isOpen,
+  onClose,
+  teamCode,
+  teamName,
+  difficulty,
+  messages,
+  onLoadGame,
+}: SaveLoadModalProps) {
+  const [activeTab, setActiveTab] = useState<'save' | 'load'>('save');
+  const [savedGames, setSavedGames] = useState<SavedGame[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>('');
+  const { showToast } = useToast();
 
-export default function SaveLoadModal({ isOpen, onClose, onLoad, getSaveData }: SaveLoadModalProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('save');
-  const [localMetadata, setLocalMetadata] = useState<{ lastModified: number } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const { saveToFile, saveToLocal, loadFromFile, loadFromLocal, getLocalMetadata, isLoading } = useSaveLoad({
-    onLoadSuccess: (data) => {
-      onLoad(data);
-      onClose();
-    },
-    onError: (error) => {
-      console.error('[SaveLoadModal] 오류:', error);
-    },
-  });
-
-  // 브라우저 저장 데이터 메타데이터 조회
+  // 저장된 게임 목록 불러오기
   useEffect(() => {
     if (isOpen && activeTab === 'load') {
-      getLocalMetadata().then((metadata) => {
-        if (metadata) {
-          setLocalMetadata({ lastModified: metadata.lastModified });
-        } else {
-          setLocalMetadata(null);
-        }
+      loadSavedGames();
+    }
+  }, [isOpen, activeTab]);
+
+  const loadSavedGames = async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        setError('로그인이 필요합니다.');
+        setLoading(false);
+        return;
+      }
+
+      const userId = session.user.id;
+
+      // game_state에서 저장된 게임 조회
+      const { data: gameStates, error: stateError } = await supabase
+        .from('game_state')
+        .select('*, teams(code, name, budget)')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false });
+
+      if (stateError) {
+        throw new Error(`게임 목록 조회 실패: ${stateError.message}`);
+      }
+
+      if (!gameStates || gameStates.length === 0) {
+        setSavedGames([]);
+        setLoading(false);
+        return;
+      }
+
+      // 각 게임에 대해 팀 정보 조회
+      const gamesWithTeamInfo = gameStates.map((gameState) => {
+        const team = gameState.teams as any;
+        if (!team) return null;
+
+        return {
+          teamCode: team.code || String(gameState.my_team_id),
+          teamName: team.name,
+          difficulty: gameState.difficulty || 'NORMAL',
+          currentYear: gameState.current_year || 2026,
+          currentMonth: gameState.current_month || 1,
+          currentWeek: gameState.current_week || 1,
+          budget: team.budget || 0,
+          savedAt: gameState.updated_at || gameState.created_at || new Date().toISOString(),
+        } as SavedGame;
+      }).filter((game): game is SavedGame => game !== null);
+
+      setSavedGames(gamesWithTeamInfo);
+    } catch (err: any) {
+      console.error('저장된 게임 불러오기 오류:', err);
+      setError(err.message || '저장된 게임을 불러오는 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 게임 저장
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        showToast('로그인이 필요합니다.', 'error');
+        setSaving(false);
+        return;
+      }
+
+      const userId = session.user.id;
+
+      // 현재 메시지를 저장
+      await GameService.saveGame(userId, teamCode, {
+        messages: messages.map((msg: any) => {
+          // UIMessage 형식에서 content 추출
+          let content = '';
+          if (msg.parts && Array.isArray(msg.parts)) {
+            content = msg.parts
+              .map((part: any) => {
+                if (typeof part === 'string') return part;
+                if (part.text) return part.text;
+                if (part.content) return part.content;
+                return '';
+              })
+              .filter((text: string) => text && text.trim().length > 0)
+              .join(' ');
+          } else if (msg.content) {
+            content = msg.content;
+          } else if (msg.text) {
+            content = msg.text;
+          }
+
+          return {
+            role: msg.role,
+            content: content,
+          };
+        }),
+        difficulty: difficulty,
       });
-    }
-  }, [isOpen, activeTab, getLocalMetadata]);
 
-  // 파일 저장 핸들러
-  const handleSaveToFile = useCallback(async () => {
-    const saveData = getSaveData();
-    await saveToFile(saveData);
-  }, [getSaveData, saveToFile]);
-
-  // 브라우저 저장 핸들러
-  const handleSaveToLocal = useCallback(async () => {
-    const saveData = getSaveData();
-    await saveToLocal(saveData);
-    // 저장 후 메타데이터 업데이트
-    const metadata = await getLocalMetadata();
-    if (metadata) {
-      setLocalMetadata({ lastModified: metadata.lastModified });
-    }
-  }, [getSaveData, saveToLocal, getLocalMetadata]);
-
-  // 파일 불러오기 핸들러
-  const handleLoadFromFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-
-    const data = await loadFromFile(file);
-    if (data) {
-      onLoad(data);
+      showToast('게임이 저장되었습니다.', 'success');
       onClose();
+    } catch (err: any) {
+      console.error('게임 저장 오류:', err);
+      setError(err.message || '게임 저장 중 오류가 발생했습니다.');
+      showToast(`게임 저장 중 오류가 발생했습니다: ${err.message}`, 'error');
+    } finally {
+      setSaving(false);
     }
+  };
 
-    // 파일 입력 초기화 (같은 파일을 다시 선택할 수 있도록)
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  }, [loadFromFile, onLoad, onClose]);
+  // 게임 불러오기
+  const handleLoad = async (game: SavedGame) => {
+    setLoading(true);
+    setError('');
 
-  // 브라우저 불러오기 핸들러
-  const handleLoadFromLocal = useCallback(async () => {
-    const data = await loadFromLocal();
-    if (data) {
-      onLoad(data);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        showToast('로그인이 필요합니다.', 'error');
+        setLoading(false);
+        return;
+      }
+
+      const userId = session.user.id;
+
+      // GameService를 통해 게임 데이터 불러오기
+      const gameData = await GameService.loadGame(userId, game.teamCode);
+
+      // 메시지 형식 변환 (DB에서 불러온 형식을 UIMessage 형식으로)
+      const formattedMessages = (gameData.messages || []).map((msg: any, index: number) => ({
+        id: `msg-${Date.now()}-${index}`,
+        role: msg.role === 'model' ? 'assistant' : msg.role,
+        parts: [{ type: 'text', text: msg.content }],
+        content: msg.content,
+      }));
+
+      onLoadGame({
+        teamCode: gameData.teamCode,
+        teamName: gameData.teamName,
+        difficulty: gameData.difficulty,
+        messages: formattedMessages,
+      });
+
+      showToast('게임이 불러와졌습니다.', 'success');
       onClose();
+    } catch (err: any) {
+      console.error('게임 불러오기 오류:', err);
+      setError(err.message || '게임 불러오기 중 오류가 발생했습니다.');
+      showToast(`게임 불러오기 중 오류가 발생했습니다: ${err.message}`, 'error');
+    } finally {
+      setLoading(false);
     }
-  }, [loadFromLocal, onLoad, onClose]);
+  };
 
-  // 파일 선택 버튼 클릭
-  const handleFileSelectClick = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
+  const getDifficultyBadge = (difficulty: string) => {
+    const badges = {
+      EASY: { text: '이지', color: 'bg-green-500' },
+      NORMAL: { text: '노말', color: 'bg-blue-500' },
+      HARD: { text: '하드', color: 'bg-orange-500' },
+      HELL: { text: '헬', color: 'bg-red-600' },
+    };
+    const badge = badges[difficulty as keyof typeof badges] || badges.NORMAL;
+    return (
+      <span className={`px-2 py-0.5 rounded-full text-xs font-bold text-white ${badge.color}`}>
+        {badge.text}
+      </span>
+    );
+  };
 
-  // 날짜 포맷팅
-  const formatDate = useCallback((timestamp: number) => {
-    const date = new Date(timestamp);
-    return date.toLocaleString('ko-KR', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }, []);
-
-  if (!isOpen) return null;
+  const formatDate = (dateString: string) => {
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('ko-KR', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return dateString;
+    }
+  };
 
   return (
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Backdrop */}
+          {/* 배경 오버레이 */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -123,169 +250,166 @@ export default function SaveLoadModal({ isOpen, onClose, onLoad, getSaveData }: 
             className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
           />
 
-          {/* Modal */}
+          {/* 모달 */}
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
           >
-            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col border-2 border-baseball-green/30">
-              {/* Header */}
-              <div className="bg-gradient-to-r from-baseball-green to-[#0a3528] px-6 py-4 flex items-center justify-between flex-shrink-0">
-                <h2 className="text-2xl font-bold text-white">저장 / 불러오기</h2>
+            <div
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col pointer-events-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* 헤더 */}
+              <div className="bg-gradient-to-r from-baseball-green to-[#0a3528] px-6 py-4 rounded-t-2xl flex items-center justify-between border-b-2 border-baseball-gold">
+                <div className="flex items-center gap-3">
+                  <Trophy className="w-5 h-5 text-baseball-gold" />
+                  <h2 className="text-xl font-bold text-white">저장 / 불러오기</h2>
+                </div>
                 <button
                   onClick={onClose}
-                  className="p-2 hover:bg-white/20 active:bg-white/30 rounded-lg transition-colors"
-                  title="닫기"
+                  className="p-1 hover:bg-white/10 rounded-lg transition-colors"
                 >
-                  <X className="w-6 h-6 text-white" />
+                  <X className="w-5 h-5 text-white" />
                 </button>
               </div>
 
-              {/* Tabs */}
-              <div className="flex border-b border-gray-200 bg-gray-50">
+              {/* 탭 */}
+              <div className="flex border-b border-slate-200 dark:border-slate-700">
                 <button
                   onClick={() => setActiveTab('save')}
-                  className={`flex-1 px-6 py-3 text-center font-semibold transition-colors ${
+                  className={`flex-1 px-6 py-3 font-semibold transition-colors ${
                     activeTab === 'save'
-                      ? 'bg-white text-baseball-green border-b-2 border-baseball-green'
-                      : 'text-gray-600 hover:text-baseball-green'
+                      ? 'bg-baseball-green text-white border-b-2 border-baseball-gold'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
                   }`}
                 >
-                  저장하기
+                  <div className="flex items-center justify-center gap-2">
+                    <Save className="w-4 h-4" />
+                    <span>저장</span>
+                  </div>
                 </button>
                 <button
                   onClick={() => setActiveTab('load')}
-                  className={`flex-1 px-6 py-3 text-center font-semibold transition-colors ${
+                  className={`flex-1 px-6 py-3 font-semibold transition-colors ${
                     activeTab === 'load'
-                      ? 'bg-white text-baseball-green border-b-2 border-baseball-green'
-                      : 'text-gray-600 hover:text-baseball-green'
+                      ? 'bg-baseball-green text-white border-b-2 border-baseball-gold'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
                   }`}
                 >
-                  불러오기
+                  <div className="flex items-center justify-center gap-2">
+                    <FolderOpen className="w-4 h-4" />
+                    <span>불러오기</span>
+                  </div>
                 </button>
               </div>
 
-              {/* Content */}
+              {/* 본문 */}
               <div className="flex-1 overflow-y-auto p-6">
                 {activeTab === 'save' ? (
                   <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-gray-800 mb-4">게임 데이터 저장</h3>
-                    
-                    {/* 파일로 저장 */}
-                    <div className="border-2 border-gray-200 rounded-xl p-5 hover:border-baseball-green/50 transition-colors">
-                      <div className="flex items-start gap-4">
-                        <div className="bg-blue-100 p-3 rounded-lg flex-shrink-0">
-                          <Download className="w-6 h-6 text-blue-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-lg font-semibold text-gray-800 mb-1">파일로 저장</h4>
-                          <p className="text-sm text-gray-600 mb-4">
-                            JSON 파일로 다운로드하여 백업하거나 다른 기기로 이동할 수 있습니다.
-                          </p>
-                          <button
-                            onClick={handleSaveToFile}
-                            disabled={isLoading}
-                            className="w-full sm:w-auto px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors disabled:cursor-not-allowed"
-                          >
-                            {isLoading ? '저장 중...' : '파일 다운로드'}
-                          </button>
-                        </div>
+                    <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-4 border-l-4 border-baseball-green">
+                      <h3 className="font-bold text-baseball-green dark:text-baseball-gold mb-2">
+                        현재 게임 정보
+                      </h3>
+                      <div className="space-y-1 text-sm text-gray-700 dark:text-gray-300">
+                        <p><span className="font-semibold">팀:</span> {teamName || '알 수 없음'}</p>
+                        {difficulty && (
+                          <p><span className="font-semibold">난이도:</span> {difficulty}</p>
+                        )}
+                        <p><span className="font-semibold">메시지 수:</span> {messages.length}개</p>
                       </div>
                     </div>
 
-                    {/* 브라우저 저장 */}
-                    <div className="border-2 border-gray-200 rounded-xl p-5 hover:border-baseball-green/50 transition-colors">
-                      <div className="flex items-start gap-4">
-                        <div className="bg-green-100 p-3 rounded-lg flex-shrink-0">
-                          <HardDrive className="w-6 h-6 text-green-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-lg font-semibold text-gray-800 mb-1">브라우저에 저장</h4>
-                          <p className="text-sm text-gray-600 mb-4">
-                            현재 브라우저에 즉시 저장하여 빠르게 이어하기 할 수 있습니다.
-                          </p>
-                          <button
-                            onClick={handleSaveToLocal}
-                            disabled={isLoading}
-                            className="w-full sm:w-auto px-6 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors disabled:cursor-not-allowed"
-                          >
-                            {isLoading ? '저장 중...' : '브라우저 저장'}
-                          </button>
-                        </div>
+                    {error && (
+                      <div className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                        <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                        <p className="text-red-700 dark:text-red-400 text-sm">{error}</p>
                       </div>
-                    </div>
+                    )}
+
+                    <button
+                      onClick={handleSave}
+                      disabled={saving}
+                      className="w-full px-6 py-3 bg-baseball-green hover:bg-baseball-green-dark disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      {saving ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <span>저장 중...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-5 h-5" />
+                          <span>게임 저장</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-gray-800 mb-4">게임 데이터 불러오기</h3>
-                    
-                    {/* 파일에서 불러오기 */}
-                    <div className="border-2 border-gray-200 rounded-xl p-5 hover:border-baseball-green/50 transition-colors">
-                      <div className="flex items-start gap-4">
-                        <div className="bg-blue-100 p-3 rounded-lg flex-shrink-0">
-                          <Upload className="w-6 h-6 text-blue-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-lg font-semibold text-gray-800 mb-1">파일 선택</h4>
-                          <p className="text-sm text-gray-600 mb-4">
-                            저장된 JSON 파일을 선택하여 게임을 불러옵니다.
-                          </p>
-                          <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept=".json"
-                            onChange={handleLoadFromFile}
-                            className="hidden"
-                          />
-                          <button
-                            onClick={handleFileSelectClick}
-                            disabled={isLoading}
-                            className="w-full sm:w-auto px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors disabled:cursor-not-allowed"
-                          >
-                            {isLoading ? '불러오는 중...' : '파일 선택'}
-                          </button>
+                    {loading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="w-8 h-8 text-baseball-green animate-spin" />
+                        <span className="ml-3 text-gray-600 dark:text-gray-400">저장된 게임을 불러오는 중...</span>
+                      </div>
+                    ) : error ? (
+                      <div className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                        <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                        <div>
+                          <p className="text-red-700 dark:text-red-400 font-semibold">오류 발생</p>
+                          <p className="text-red-600 dark:text-red-500 text-sm mt-1">{error}</p>
                         </div>
                       </div>
-                    </div>
-
-                    {/* 브라우저에서 불러오기 */}
-                    <div className="border-2 border-gray-200 rounded-xl p-5 hover:border-baseball-green/50 transition-colors">
-                      <div className="flex items-start gap-4">
-                        <div className="bg-green-100 p-3 rounded-lg flex-shrink-0">
-                          <FolderOpen className="w-6 h-6 text-green-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-lg font-semibold text-gray-800 mb-1">브라우저에서 불러오기</h4>
-                          {localMetadata ? (
-                            <>
-                              <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
-                                <Calendar className="w-4 h-4" />
-                                <span>{formatDate(localMetadata.lastModified)}에 저장된 데이터</span>
+                    ) : savedGames.length === 0 ? (
+                      <div className="text-center py-12">
+                        <p className="text-gray-600 dark:text-gray-400 mb-2">저장된 게임이 없습니다.</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-500">
+                          새 게임을 시작하여 게임을 저장해보세요.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {savedGames.map((game, index) => (
+                          <motion.button
+                            key={`${game.teamCode}-${index}`}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: index * 0.05 }}
+                            onClick={() => handleLoad(game)}
+                            disabled={loading}
+                            className="w-full p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg border-2 border-gray-200 dark:border-slate-600 hover:border-baseball-green dark:hover:border-baseball-gold transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <h3 className="font-bold text-lg text-gray-900 dark:text-white group-hover:text-baseball-green dark:group-hover:text-baseball-gold transition-colors">
+                                    {game.teamName}
+                                  </h3>
+                                  {getDifficultyBadge(game.difficulty)}
+                                </div>
+                                <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
+                                  <div className="flex items-center gap-1">
+                                    <Calendar className="w-4 h-4" />
+                                    <span>
+                                      {game.currentYear}년 {game.currentMonth}월 {game.currentWeek}주차
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="font-semibold">자금:</span>{' '}
+                                    {(game.budget / 100000000).toFixed(1)}억 원
+                                  </div>
+                                </div>
+                                <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
+                                  저장 시각: {formatDate(game.savedAt)}
+                                </p>
                               </div>
-                              <p className="text-sm text-gray-600 mb-4">
-                                브라우저에 저장된 게임 데이터를 불러옵니다.
-                              </p>
-                            </>
-                          ) : (
-                            <div className="flex items-center gap-2 text-sm text-amber-600 mb-4">
-                              <AlertCircle className="w-4 h-4" />
-                              <span>저장된 게임 데이터가 없습니다.</span>
                             </div>
-                          )}
-                          <button
-                            onClick={handleLoadFromLocal}
-                            disabled={isLoading || !localMetadata}
-                            className="w-full sm:w-auto px-6 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors disabled:cursor-not-allowed"
-                          >
-                            {isLoading ? '불러오는 중...' : '게임 불러오기'}
-                          </button>
-                        </div>
+                          </motion.button>
+                        ))}
                       </div>
-                    </div>
+                    )}
                   </div>
                 )}
               </div>

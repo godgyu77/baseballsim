@@ -27,6 +27,8 @@ function MessageBubble({
 
   // 사용자 메시지는 최소화된 로그 형태로 표시
   if (isUser) {
+    // 사용자 메시지는 원본 메시지를 그대로 표시 (parseAIResponse를 거치지 않음)
+    const displayText = message || '';
     return (
       <motion.div
         initial={{ opacity: 0, x: 20 }}
@@ -35,7 +37,7 @@ function MessageBubble({
         className="mb-3 flex justify-end"
       >
         <div className="bg-gradient-to-r from-baseball-green/10 to-baseball-green/5 border-2 border-baseball-green/30 rounded-lg px-4 py-2 text-xs text-gray-700 font-mono shadow-sm hover:shadow-md transition-all hover:border-baseball-green/50">
-          <span className="text-baseball-green font-semibold">[지시]</span> {parsed.text}
+          <span className="text-baseball-green font-semibold">[지시]</span> {displayText}
         </div>
       </motion.div>
     );
@@ -145,7 +147,7 @@ function MessageBubble({
                       }}
                     >
                       <table 
-                        className={`border-collapse bg-white text-xs sm:text-sm md:text-base whitespace-nowrap ${isBatterTable ? 'batter-table' : ''}`}
+                        className={`border-collapse bg-white dark:bg-slate-800 text-xs sm:text-sm md:text-base whitespace-nowrap ${isBatterTable ? 'batter-table' : ''}`}
                         style={{ 
                           tableLayout: isBatterTable ? 'fixed' : 'auto', 
                           minWidth: 'max-content', 
@@ -173,7 +175,7 @@ function MessageBubble({
                 const isBatterTable = props['data-batter-table'] === true;
                 return (
                   <thead 
-                    className="bg-baseball-green text-white sticky top-0 z-10"
+                    className="bg-baseball-green dark:bg-baseball-green/90 text-white sticky top-0 z-10"
                     data-batter-table={isBatterTable}
                   >
                     {React.Children.map(React.Children.toArray(children), (child: any) => {
@@ -188,7 +190,7 @@ function MessageBubble({
                 );
               },
               tbody: ({ children }: any) => (
-                <tbody className="divide-y divide-gray-200 bg-white">
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-slate-800">
                   {children}
                 </tbody>
               ),
@@ -240,7 +242,7 @@ function MessageBubble({
                 
                 return (
                   <th 
-                    className={`border border-gray-300 px-1 sm:px-2 md:px-3 py-1 sm:py-2 md:py-2.5 text-left font-semibold text-xs sm:text-sm md:text-base text-white bg-baseball-green whitespace-nowrap cursor-default ${isBatterTable ? 'batter-table-cell' : ''}`}
+                    className={`border border-gray-300 dark:border-gray-600 px-1 sm:px-2 md:px-3 py-1 sm:py-2 md:py-2.5 text-left font-semibold text-xs sm:text-sm md:text-base text-white bg-baseball-green dark:bg-baseball-green/90 whitespace-nowrap cursor-default ${isBatterTable ? 'batter-table-cell' : ''}`}
                     style={{ 
                       ...(minWidth ? { minWidth } : {}),
                       wordBreak: 'keep-all', 
@@ -292,12 +294,12 @@ function MessageBubble({
                 
                 return (
                   <td 
-                    className={`border border-gray-300 px-1 sm:px-2 md:px-3 py-1 sm:py-2 md:py-2.5 text-xs sm:text-sm md:text-base font-mono cursor-default whitespace-nowrap ${
+                    className={`border border-gray-300 dark:border-gray-600 px-1 sm:px-2 md:px-3 py-1 sm:py-2 md:py-2.5 text-xs sm:text-sm md:text-base font-mono cursor-default whitespace-nowrap text-gray-800 dark:text-gray-200 ${
                       isDivisionColumn 
                         ? cellText.trim() === '1군' 
-                          ? 'font-bold text-baseball-green bg-green-50' 
-                          : 'font-bold text-gray-600 bg-gray-50'
-                        : ''
+                          ? 'font-bold text-baseball-green dark:text-baseball-green bg-green-50 dark:bg-green-900/30' 
+                          : 'font-bold text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/50'
+                        : 'bg-white dark:bg-slate-800'
                     } ${isBatterTable ? 'batter-table-cell' : ''}`}
                     style={{ 
                       ...(minWidth ? { minWidth } : {}),
