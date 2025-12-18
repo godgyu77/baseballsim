@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import type { GamePlayer } from '../types/index';
 
 /**
  * 팀 코드를 DB ID로 변환하는 헬퍼 함수
@@ -46,11 +47,13 @@ export const GameService = {
     if (difficulty === 'HELL') startBudget = 1000000000; // 10억
 
     // 2. 기존 게임 상태 정리 (새 게임 덮어쓰기)
+    // game_players도 함께 삭제 (CASCADE로 자동 삭제되지만 명시적으로)
+    await supabase.from('game_players').delete().eq('user_id', userId).eq('team_id', actualTeamId);
     await supabase.from('game_state').delete().eq('user_id', userId);
-    await supabase.from('finance_logs').delete().eq('team_id', actualTeamId); 
+    await supabase.from('finance_logs').delete().eq('user_id', userId).eq('team_id', actualTeamId); 
 
-    // 3. game_state 생성
-    const { error: stateError } = await supabase
+    // 3. game_state 생성 (budget 포함)
+    const { data: newGameState, error: stateError } = await supabase
       .from('game_state')
       .insert({
         user_id: userId,
@@ -59,18 +62,57 @@ export const GameService = {
         owner_persona: ownerType,
         current_year: 2026,
         current_month: 1,
-        current_week: 1
-      });
+        current_week: 1,
+        budget: startBudget  // game_state.budget에 저장 (teams.budget 사용 안 함)
+      })
+      .select('id')
+      .single();
     
-    if (stateError) throw new Error(`게임 상태 생성 실패: ${stateError.message}`);
+    if (stateError || !newGameState) {
+      throw new Error(`게임 상태 생성 실패: ${stateError?.message || '알 수 없는 오류'}`);
+    }
 
-    // 4. 팀 예산 업데이트
-    const { error: teamError } = await supabase
-      .from('teams')
-      .update({ budget: startBudget })
-      .eq('id', actualTeamId); // 실제 DB ID 사용
-    
-    if (teamError) throw new Error(`팀 예산 설정 실패: ${teamError.message}`);
+    const gameId = newGameState.id;
+
+    // 4. 초기 로스터를 game_players에 복사 (마스터 데이터 → 유저 인스턴스)
+    const { data: masterPlayers, error: playersError } = await supabase
+      .from('players')
+      .select('id, stats, salary, condition, role')
+      .eq('team_id', actualTeamId);
+
+    if (playersError) {
+      console.error('마스터 선수 데이터 조회 실패:', playersError);
+      throw new Error(`초기 로스터 조회 실패: ${playersError.message}`);
+    }
+
+    if (masterPlayers && masterPlayers.length > 0) {
+      const gamePlayers = masterPlayers.map(p => ({
+        user_id: userId,
+        team_id: actualTeamId,
+        player_id: p.id,
+        game_id: gameId,
+        stats: p.stats || {},  // 초기 스탯 복사
+        salary: p.salary || 0,
+        condition: p.condition || '건강',
+        role: p.role || '1군',
+      }));
+
+      // 배치 삽입 (성능 최적화)
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < gamePlayers.length; i += BATCH_SIZE) {
+        const batch = gamePlayers.slice(i, i + BATCH_SIZE);
+        const { error: insertError } = await supabase
+          .from('game_players')
+          .insert(batch);
+
+        if (insertError) {
+          console.error(`게임 선수 데이터 삽입 실패 (배치 ${Math.floor(i / BATCH_SIZE) + 1}):`, insertError);
+          throw new Error(`초기 로스터 저장 실패: ${insertError.message}`);
+        }
+      }
+
+      console.log(`✅ 초기 로스터 ${gamePlayers.length}명이 game_players에 복사되었습니다.`);
+    }
 
     // 5. 초기 재정 로그 기록
     await supabase.from('finance_logs').insert({
@@ -99,17 +141,25 @@ export const GameService = {
     currentWeek?: number;
     budget?: number;
     difficulty?: string;
+    roster?: Array<{
+      playerId: number;  // players 테이블의 ID
+      stats: any;       // JSONB 스탯
+      salary: number;   // 연봉 (원 단위)
+      condition: string; // 컨디션
+      role?: string;    // 역할
+    }>;
   }) {
     try {
       // 팀 코드를 DB ID로 변환
       const teamId = await getTeamIdByCode(teamCode);
 
-      // 1. game_state 업데이트
+      // 1. game_state 업데이트 (budget 포함)
       const updateData: any = {};
       if (gameData.currentYear !== undefined) updateData.current_year = gameData.currentYear;
       if (gameData.currentMonth !== undefined) updateData.current_month = gameData.currentMonth;
       if (gameData.currentWeek !== undefined) updateData.current_week = gameData.currentWeek;
       if (gameData.difficulty !== undefined) updateData.difficulty = gameData.difficulty;
+      if (gameData.budget !== undefined) updateData.budget = gameData.budget;  // game_state.budget 사용
 
       if (Object.keys(updateData).length > 0) {
         const { error: stateError } = await supabase
@@ -124,17 +174,32 @@ export const GameService = {
         }
       }
 
-      // 2. 팀 예산 업데이트
-      if (gameData.budget !== undefined) {
-        const { error: budgetError } = await supabase
-          .from('teams')
-          .update({ budget: gameData.budget })
-          .eq('id', teamId);
+      // 2. 선수 스탯 저장 (game_players 테이블에 UPSERT)
+      if (gameData.roster && gameData.roster.length > 0) {
+        // Promise.all을 사용하여 병렬 처리 (성능 최적화)
+        const upsertPromises = gameData.roster.map(async (player) => {
+          const { error: upsertError } = await supabase
+            .from('game_players')
+            .upsert({
+              user_id: userId,
+              team_id: teamId,
+              player_id: player.playerId,
+              stats: player.stats,
+              salary: player.salary,
+              condition: player.condition,
+              role: player.role || '1군',
+            }, {
+              onConflict: 'user_id,team_id,player_id',  // UNIQUE 제약 조건
+            });
 
-        if (budgetError) {
-          console.error('예산 저장 실패:', budgetError);
-          throw new Error(`예산 저장 실패: ${budgetError.message}`);
-        }
+          if (upsertError) {
+            console.error(`선수 스탯 저장 실패 (player_id: ${player.playerId}):`, upsertError);
+            throw new Error(`선수 스탯 저장 실패: ${upsertError.message}`);
+          }
+        });
+
+        await Promise.all(upsertPromises);
+        console.log(`✅ ${gameData.roster.length}명의 선수 스탯이 저장되었습니다.`);
       }
 
       // 3. 메시지 히스토리 저장
@@ -205,7 +270,7 @@ export const GameService = {
       // 팀 코드를 DB ID로 변환
       const teamId = await getTeamIdByCode(teamCode);
 
-      // 1. game_state 조회
+      // 1. game_state 조회 (budget 포함)
       const { data: gameState, error: stateError } = await supabase
         .from('game_state')
         .select('*')
@@ -217,10 +282,10 @@ export const GameService = {
         throw new Error(`게임 상태 조회 실패: ${stateError?.message || '게임을 찾을 수 없습니다.'}`);
       }
 
-      // 2. 팀 정보 조회
+      // 2. 팀 정보 조회 (budget은 game_state에서 가져오므로 teams.budget은 사용 안 함)
       const { data: team, error: teamError } = await supabase
         .from('teams')
-        .select('name, budget, code')
+        .select('name, code')
         .eq('id', teamId)
         .single();
 
@@ -228,7 +293,19 @@ export const GameService = {
         throw new Error(`팀 정보 조회 실패: ${teamError?.message || '팀을 찾을 수 없습니다.'}`);
       }
 
-      // 3. 메시지 히스토리 조회
+      // 3. game_players 조회 (저장된 선수 스탯)
+      const { data: gamePlayers, error: playersError } = await supabase
+        .from('game_players')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('team_id', teamId);
+
+      if (playersError) {
+        console.warn('게임 선수 데이터 조회 실패:', playersError);
+        // game_players가 없으면 구버전 데이터일 수 있음 (Fallback 처리)
+      }
+
+      // 4. 메시지 히스토리 조회
       const { data: messages, error: messagesError } = await supabase
         .from('game_messages')
         .select('*')
@@ -249,8 +326,9 @@ export const GameService = {
         currentYear: gameState.current_year,
         currentMonth: gameState.current_month,
         currentWeek: gameState.current_week,
-        budget: team.budget,
+        budget: gameState.budget || 3000000000,  // game_state.budget 사용 (기본값: 30억)
         ownerPersona: gameState.owner_persona,
+        roster: gamePlayers || [],  // 저장된 선수 데이터 (없으면 빈 배열)
         messages: messages?.map((msg) => ({
           role: msg.role === 'model' ? 'assistant' : msg.role,
           content: msg.content,

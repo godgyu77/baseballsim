@@ -16,6 +16,7 @@ import TokenUsageModal from './TokenUsageModal';
 import { useToast } from '../context/ToastContext';
 import { ChatService } from '../services/ChatService';
 import { SafeSessionStorage } from '../lib/safeStorage';
+import { supabase } from '../lib/supabase';
 
 interface ChatInterfaceProps {
   teamId: string; // 팀 코드 (예: 'kia', 'samsung', 'hanwha')
@@ -60,6 +61,24 @@ export default function ChatInterface({
   }>>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { showToast } = useToast();
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // Supabase 세션에서 userId 가져오기
+  useEffect(() => {
+    const getUserId = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          setUserId(session.user.id);
+        } else {
+          console.error('사용자 세션이 없습니다.');
+        }
+      } catch (error) {
+        console.error('사용자 ID 조회 실패:', error);
+      }
+    };
+    getUserId();
+  }, []);
 
   // 세션 스토리지에서 API Key 불러오기
   useEffect(() => {
@@ -145,92 +164,35 @@ export default function ChatInterface({
             throw new Error('전송할 메시지가 없습니다.');
           }
 
+          // userId 확인 (상태가 없으면 직접 세션에서 가져오기)
+          let currentUserId = userId;
+          if (!currentUserId) {
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (session?.user) {
+                currentUserId = session.user.id;
+                setUserId(currentUserId); // 상태도 업데이트
+              } else {
+                throw new Error('사용자 세션이 없습니다. 다시 로그인해주세요.');
+              }
+            } catch (error: any) {
+              console.error('사용자 ID 조회 실패:', error);
+              throw new Error('사용자 인증이 필요합니다. 다시 로그인해주세요.');
+            }
+          }
+
+          // ChatService가 toDataStreamResponse 형식으로 반환하므로
+          // useChat이 자동으로 처리할 수 있도록 Response 객체를 직접 반환
           const response = await ChatService.streamChat({
             messages: formattedMessages,
             apiKey: currentApiKey, // sessionStorage에서 가져온 키 사용
             teamCode: teamId, // teamId는 이제 코드
+            userId: currentUserId, // Supabase auth에서 가져온 userId
           });
 
-          if (!response || !response.body) {
-            throw new Error('Response body is null');
-          }
-
-          // toDataStreamResponse()가 반환하는 ReadableStream<Uint8Array>를
-          // UIMessageChunk 형식으로 변환
-          const decoder = new TextDecoder();
-          let buffer = ''; // 불완전한 JSON을 저장할 버퍼
-          
-          const stream = new ReadableStream({
-            async start(controller) {
-              try {
-                const reader = response.body!.getReader();
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) {
-                    // 마지막 버퍼 처리
-                    if (buffer.trim()) {
-                      try {
-                        const data = JSON.parse(buffer);
-                        if (data.type === 'text-delta' && data.textDelta) {
-                          controller.enqueue({
-                            type: 'text-delta',
-                            textDelta: data.textDelta,
-                            text: data.textDelta, // text 속성도 함께 제공
-                          });
-                        } else if (data.type === 'token-usage' && data.usage) {
-                          // 토큰 사용량 정보 저장
-                          setTokenUsageHistory((prev) => [
-                            ...prev,
-                            {
-                              promptTokens: data.usage.promptTokens || 0,
-                              completionTokens: data.usage.completionTokens || 0,
-                              totalTokens: data.usage.totalTokens || 0,
-                              timestamp: new Date(),
-                            },
-                          ]);
-                        }
-                      } catch (e) {
-                        // 버퍼가 불완전한 JSON이면 무시
-                        console.warn('Failed to parse final buffer:', buffer);
-                      }
-                    }
-                    break;
-                  }
-                  
-                  // Uint8Array를 문자열로 디코딩
-                  const text = decoder.decode(value, { stream: true });
-                  buffer += text;
-                  
-                  // 완전한 JSON 줄만 파싱 (줄바꿈으로 구분)
-                  const lines = buffer.split('\n');
-                  buffer = lines.pop() || ''; // 마지막 불완전한 줄은 버퍼에 남김
-                  
-                  for (const line of lines) {
-                    if (!line.trim()) continue;
-                    try {
-                      const data = JSON.parse(line);
-                      // UIMessageChunk 형식으로 변환
-                      if (data.type === 'text-delta' && data.textDelta) {
-                        controller.enqueue({
-                          type: 'text-delta',
-                          textDelta: data.textDelta,
-                          text: data.textDelta, // text 속성도 함께 제공
-                        });
-              }
-            } catch (e) {
-                      // JSON 파싱 실패 시 무시 (불완전한 JSON일 수 있음)
-                      // console.warn('Failed to parse chunk:', line);
-                    }
-                  }
-                }
-                controller.close();
-      } catch (error) {
-                controller.error(error);
-              }
-            },
-          });
-
-          return stream;
+          // toDataStreamResponse가 반환한 Response 객체를 그대로 반환
+          // useChat이 자동으로 스트림을 파싱하여 처리함
+          return response;
         } catch (error: any) {
           console.error('ChatService error:', error);
           throw error;

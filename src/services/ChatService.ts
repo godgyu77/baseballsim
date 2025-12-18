@@ -1,4 +1,4 @@
-import { streamText } from 'ai';
+import { streamText, toDataStreamResponse } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { ContextService } from './ContextService';
 import { KBO_SYSTEM_LOGIC } from '../constants/prompts/SystemLogic';
@@ -16,10 +16,12 @@ export class ChatService {
     messages,
     apiKey,
     teamCode,
+    userId,
   }: {
     messages: Array<{ role: string; content: string }>;
     apiKey: string;
     teamCode: string;
+    userId: string;  // 필수: game_players 조회를 위해
   }) {
     // 1. 필수 파라미터 검증
     if (!apiKey) {
@@ -30,8 +32,12 @@ export class ChatService {
       throw new Error('Team Code가 필요합니다.');
     }
 
-    // 2. ContextService를 통해 게임 컨텍스트 생성
-    const gameContext = await ContextService.generateGameContext(teamCode);
+    if (!userId) {
+      throw new Error('User ID가 필요합니다.');
+    }
+
+    // 2. ContextService를 통해 게임 컨텍스트 생성 (userId 전달)
+    const gameContext = await ContextService.generateGameContext(teamCode, userId);
 
     // 3. 시스템 프롬프트 조립
     const systemPrompt = `${KBO_SYSTEM_LOGIC}
@@ -60,54 +66,9 @@ ${gameContext}
       temperature: 0.7,
     });
 
-    // 6. 스트리밍 응답 반환
-    // result.textStream을 직접 반환하여 ChatInterface에서 처리
-    // ReadableStream<Uint8Array> 형식으로 변환
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        try {
-          for await (const chunk of result.textStream) {
-            // text-delta 형식으로 변환
-            const data = JSON.stringify({
-              type: 'text-delta',
-              textDelta: chunk,
-            }) + '\n';
-            controller.enqueue(encoder.encode(data));
-          }
-          
-          // 토큰 사용량 정보를 스트림 끝에 추가
-          try {
-            const usage = await result.usage;
-            if (usage) {
-              const usageData = JSON.stringify({
-                type: 'token-usage',
-                usage: {
-                  promptTokens: usage.promptTokens || 0,
-                  completionTokens: usage.completionTokens || 0,
-                  totalTokens: usage.totalTokens || 0,
-                },
-              }) + '\n';
-              controller.enqueue(encoder.encode(usageData));
-            }
-          } catch (e) {
-            // usage 정보를 가져올 수 없으면 무시
-            console.warn('Token usage 정보를 가져올 수 없습니다:', e);
-          }
-          
-          controller.close();
-        } catch (error) {
-          controller.error(error);
-        }
-      },
-    });
-
-    // Response 객체로 래핑하여 반환
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-      },
-    });
+    // 6. @ai-sdk/react의 useChat이 기대하는 표준 형식으로 변환
+    // toDataStreamResponse를 사용하여 자동으로 올바른 형식으로 변환
+    return toDataStreamResponse(result);
   }
 }
 
