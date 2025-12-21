@@ -30,11 +30,18 @@ git push -u origin main
 5. "Deploy" 클릭
 6. 배포 완료 후 URL 받기 (예: `https://your-game.vercel.app`)
 
-### 3단계: 환경 변수 설정 (선택사항)
+### 3단계: 환경 변수 설정 (필수: Supabase / 선택: Seed)
 
-API 키를 환경 변수로 관리하려면:
-- Vercel 대시보드 → Settings → Environment Variables
-- `VITE_GEMINI_API_KEY` 추가 (하지만 현재는 사용자가 직접 입력하므로 불필요)
+Vercel 대시보드 → Settings → Environment Variables 에 아래를 등록하세요:
+
+- **(필수) Supabase**
+  - `SUPABASE_URL`
+  - `SUPABASE_ANON_KEY`
+  - (프론트 빌드용) `VITE_SUPABASE_URL`
+  - (프론트 빌드용) `VITE_SUPABASE_ANON_KEY`
+
+- **(선택) DB 시딩/검증 스크립트용**
+  - `SUPABASE_SERVICE_ROLE_KEY` (절대 브라우저에 노출 금지)
 
 ## 📱 모바일 최적화 확인
 
@@ -78,10 +85,10 @@ npm run deploy
 
 ## 🔒 보안 주의사항
 
-⚠️ **중요**: 현재 게임은 사용자가 직접 API 키를 입력하도록 설계되어 있습니다.
-- API 키는 브라우저의 `localStorage`에 저장됩니다
-- 서버에 전송되지 않으므로 안전합니다
-- 각 사용자는 자신의 Gemini API 키를 입력해야 합니다
+⚠️ **중요**: 브라우저에서 Google Generative Language API를 직접 호출하지 않습니다. (API 키 노출 금지)
+- 사용자는 브라우저 UI에서 Gemini API 키를 입력합니다.
+- 키는 **서버(또는 Edge Function) `/api/chat`** 로 전송되어 서버에서만 Gemini 호출에 사용됩니다.
+- 프론트는 서버가 내려주는 **AI SDK v5 UI Message Stream** 을 받아 스트리밍 렌더링합니다.
 
 ## 📝 배포 후 확인사항
 

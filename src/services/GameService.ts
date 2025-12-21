@@ -49,8 +49,10 @@ export const GameService = {
     // 2. 기존 게임 상태 정리 (새 게임 덮어쓰기)
     // game_players도 함께 삭제 (CASCADE로 자동 삭제되지만 명시적으로)
     await supabase.from('game_players').delete().eq('user_id', userId).eq('team_id', actualTeamId);
-    await supabase.from('game_state').delete().eq('user_id', userId);
+    // ⚠️ 주의: user_id만으로 삭제하면 다른 팀 세이브까지 전부 삭제될 수 있음
+    await supabase.from('game_state').delete().eq('user_id', userId).eq('my_team_id', actualTeamId);
     await supabase.from('finance_logs').delete().eq('user_id', userId).eq('team_id', actualTeamId); 
+    await supabase.from('game_messages').delete().eq('user_id', userId).eq('team_id', actualTeamId);
 
     // 3. game_state 생성 (budget 포함)
     const { data: newGameState, error: stateError } = await supabase

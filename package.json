@@ -18,7 +18,6 @@
   "dependencies": {
     "@ai-sdk/google": "^2.0.47",
     "@ai-sdk/react": "^2.0.115",
-    "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "^2.87.3",
     "@tanstack/react-query": "^5.90.12",
     "ai": "^5.0.113",

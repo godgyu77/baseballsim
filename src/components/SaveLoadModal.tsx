@@ -66,9 +66,11 @@ export default function SaveLoadModal({
       const userId = session.user.id;
 
       // game_state에서 저장된 게임 조회
+      // ⚠️ supabase join(teams(...))은 FK/스키마 설정에 따라 실패할 수 있어
+      // game_state + teams를 2-step으로 안정적으로 조회합니다.
       const { data: gameStates, error: stateError } = await supabase
         .from('game_state')
-        .select('*, teams(code, name, budget)')
+        .select('my_team_id, difficulty, current_year, current_month, current_week, budget, updated_at, created_at')
         .eq('user_id', userId)
         .order('updated_at', { ascending: false });
 
@@ -82,22 +84,35 @@ export default function SaveLoadModal({
         return;
       }
 
-      // 각 게임에 대해 팀 정보 조회
-      const gamesWithTeamInfo = gameStates.map((gameState) => {
-        const team = gameState.teams as any;
-        if (!team) return null;
+      const teamIds = Array.from(new Set((gameStates || []).map((gs: any) => gs.my_team_id).filter(Boolean)));
+      const { data: teams, error: teamsError } = await supabase
+        .from('teams')
+        .select('id, code, name')
+        .in('id', teamIds.length > 0 ? teamIds : [-1]);
+      if (teamsError) {
+        throw new Error(`팀 정보 조회 실패: ${teamsError.message}`);
+      }
+      const teamById = new Map<number, { id: number; code: string; name: string }>(
+        (teams || []).map((t: any) => [t.id, t])
+      );
 
-        return {
-          teamCode: team.code || String(gameState.my_team_id),
-          teamName: team.name,
-          difficulty: gameState.difficulty || 'NORMAL',
-          currentYear: gameState.current_year || 2026,
-          currentMonth: gameState.current_month || 1,
-          currentWeek: gameState.current_week || 1,
-          budget: team.budget || 0,
-          savedAt: gameState.updated_at || gameState.created_at || new Date().toISOString(),
-        } as SavedGame;
-      }).filter((game): game is SavedGame => game !== null);
+      const gamesWithTeamInfo = (gameStates || [])
+        .map((gameState: any) => {
+          const team = teamById.get(gameState.my_team_id);
+          if (!team) return null;
+          return {
+            teamCode: team.code,
+            teamName: team.name,
+            difficulty: gameState.difficulty || 'NORMAL',
+            currentYear: gameState.current_year || 2026,
+            currentMonth: gameState.current_month || 1,
+            currentWeek: gameState.current_week || 1,
+            // budget은 teams가 아니라 game_state.budget이 "세이브의 진실"입니다.
+            budget: gameState.budget || 0,
+            savedAt: gameState.updated_at || gameState.created_at || new Date().toISOString(),
+          } as SavedGame;
+        })
+        .filter((game): game is SavedGame => game !== null);
 
       setSavedGames(gamesWithTeamInfo);
     } catch (err: any) {

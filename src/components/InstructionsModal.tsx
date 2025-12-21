@@ -1,16 +1,13 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Calendar, ChevronRight } from 'lucide-react';
+import { X, Calendar } from 'lucide-react';
 
 interface InstructionsModalProps {
   isOpen: boolean;
   onClose: () => void;
   options: Array<{ label: string; value: string }>;
   onOptionSelect: (value: string) => void;
-  onScheduleProgress: () => void;
-  isLoading?: boolean;
-  hasApiKey?: boolean;
 }
 
 export default function InstructionsModal({ 
@@ -18,9 +15,6 @@ export default function InstructionsModal({
   onClose,
   options,
   onOptionSelect,
-  onScheduleProgress,
-  isLoading = false,
-  hasApiKey = true
 }: InstructionsModalProps) {
   const handleOptionClick = (value: string) => {
     // 먼저 모달 닫기
@@ -61,22 +55,12 @@ export default function InstructionsModal({
                   <Calendar className="w-5 h-5 text-baseball-gold" />
                   <h2 className="text-xl font-bold text-white">지시사항</h2>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={onScheduleProgress}
-                    disabled={isLoading || !hasApiKey}
-                    className="px-4 py-2 bg-baseball-gold hover:bg-yellow-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                    일정 진행
-                  </button>
-                  <button
-                    onClick={onClose}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-                  >
-                    <X className="w-5 h-5 text-white" />
-                  </button>
-                </div>
+                <button
+                  onClick={onClose}
+                  className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5 text-white" />
+                </button>
               </div>
 
               {/* 본문 - AI가 생성한 선택지 버튼들 */}

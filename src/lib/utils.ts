@@ -962,6 +962,7 @@ export function parseAIResponse(message: string): ParsedMessage {
       // "날짜: YYYY/MM/DD | 자금: 0,000억 원" 형식 파싱
       const dateMatch = statusText.match(/날짜[:\s]*(\d{4}\/\d{1,2}\/\d{1,2})/i);
       const budgetMatch = statusText.match(/자금[:\s]*([0-9,.]+)\s*억/i);
+      const salaryCapMatch = statusText.match(/샐러리캡[:\s]*([0-9.]+)\s*%/i);
       
       status = {};
       if (dateMatch && dateMatch[1]) {
@@ -974,6 +975,12 @@ export function parseAIResponse(message: string): ParsedMessage {
         if (!isNaN(budgetValue) && budgetValue > 0) {
           status.budget = budgetMatch[1] + '억 원';
           status.budgetValue = budgetValue * 100000000; // 억 단위를 원 단위로 변환
+        }
+      }
+      if (salaryCapMatch && salaryCapMatch[1]) {
+        const cap = parseFloat(salaryCapMatch[1]);
+        if (!isNaN(cap) && cap >= 0) {
+          status.salaryCapUsage = cap;
         }
       }
     } catch (e) {

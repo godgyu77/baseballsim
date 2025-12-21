@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FolderOpen, Play, Key, X, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { FolderOpen, Play, Key, X, AlertCircle, CheckCircle2, LogOut } from 'lucide-react';
 import { SafeSessionStorage } from '../lib/safeStorage';
 
 interface StartScreenProps {
   apiKey: string;
   onLoadGame: () => void;
   onStartNew: () => void;
+  onLogout?: () => void;
   onGameStart?: (teamId: number, teamName?: string, difficulty?: string) => void;
   onApiKeySet?: (apiKey: string) => void;
   onApiKeyRequest?: () => void; // API Key 입력 요청 콜백
 }
 
-export default function StartScreen({ apiKey, onLoadGame, onStartNew, onGameStart, onApiKeySet, onApiKeyRequest }: StartScreenProps) {
+export default function StartScreen({ apiKey, onLoadGame, onStartNew, onLogout, onGameStart, onApiKeySet, onApiKeyRequest }: StartScreenProps) {
   const isProcessingRef = React.useRef(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [tempApiKey, setTempApiKey] = useState('');
@@ -99,6 +100,17 @@ export default function StartScreen({ apiKey, onLoadGame, onStartNew, onGameStar
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-baseball-green via-[#0a3528] to-baseball-green-dark flex items-center justify-center p-3 sm:p-4 relative">
+      {/* 로그아웃 버튼 (로그인 상태에서만 App.tsx가 onLogout을 전달) */}
+      {onLogout && (
+        <button
+          onClick={onLogout}
+          className="absolute top-3 right-3 sm:top-4 sm:right-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-black/20 hover:bg-black/30 text-white border border-white/20 backdrop-blur-sm transition-colors"
+          title="로그아웃"
+        >
+          <LogOut className="w-4 h-4" />
+          <span className="text-sm font-semibold">로그아웃</span>
+        </button>
+      )}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

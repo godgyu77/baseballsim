@@ -203,6 +203,7 @@ function App() {
             return (
               <StartScreen 
                 apiKey={apiKey}
+                onLogout={userId ? handleLogout : undefined}
                 onGameStart={(id, name, diff) => {
                   setTeamId(id);
                   setTeamName(name);

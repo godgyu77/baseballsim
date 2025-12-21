@@ -2,21 +2,21 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useChat } from '@ai-sdk/react';
-import { Send, Key, AlertCircle, HelpCircle, Calendar } from 'lucide-react';
+import { DefaultChatTransport } from 'ai';
+import { Send, Key, AlertCircle, HelpCircle, Calendar, FastForward } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MessageBubble from './MessageBubble';
-import LoadingOverlay from './LoadingOverlay';
 import GameHeader from './GameHeader';
 import InstructionsModal from './InstructionsModal';
 import HelpModal from './HelpModal';
 import SaveLoadModal from './SaveLoadModal';
 import TokenUsageModal from './TokenUsageModal';
 import { useToast } from '../context/ToastContext';
-import { ChatService } from '../services/ChatService';
 import { SafeSessionStorage } from '../lib/safeStorage';
 import { supabase } from '../lib/supabase';
+import { parseAIResponse } from '../lib/utils';
 
 interface ChatInterfaceProps {
   teamId: string; // 팀 코드 (예: 'kia', 'samsung', 'hanwha')
@@ -29,10 +29,10 @@ interface ChatInterfaceProps {
 /**
  * ChatInterface 컴포넌트
  * 
- * - 사용자가 Google Gemini API Key를 직접 입력받습니다.
+ * - 사용자가 Gemini API Key를 입력합니다.
  * - API Key는 세션 스토리지에만 저장 (DB 저장 안 함)
- * - Vercel AI SDK의 useChat 훅을 사용하여 스트리밍 채팅 구현
- * - Gemini 2.5 Flash 모델 사용
+ * - 브라우저에서 Gemini API를 직접 호출하지 않고, `/api/chat`(Edge Function)에서 호출 후
+ *   AI SDK UI Message Stream 형태로 스트리밍 응답을 받아 렌더링합니다.
  */
 export default function ChatInterface({ 
   teamId, 
@@ -59,26 +59,12 @@ export default function ChatInterface({
     totalTokens: number;
     timestamp: Date;
   }>>([]);
+  const [headerBudget, setHeaderBudget] = useState<number | null>(null);
+  const [headerDate, setHeaderDate] = useState<string | null>(null);
+  const [headerSalaryCapUsage, setHeaderSalaryCapUsage] = useState<number | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
-  const [userId, setUserId] = useState<string | null>(null);
-
-  // Supabase 세션에서 userId 가져오기
-  useEffect(() => {
-    const getUserId = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          setUserId(session.user.id);
-        } else {
-          console.error('사용자 세션이 없습니다.');
-        }
-      } catch (error) {
-        console.error('사용자 ID 조회 실패:', error);
-      }
-    };
-    getUserId();
-  }, []);
 
   // 세션 스토리지에서 API Key 불러오기
   useEffect(() => {
@@ -88,7 +74,7 @@ export default function ChatInterface({
       if (onApiKeyChange) {
         onApiKeyChange(storedKey);
       }
-        } else {
+    } else {
       setShowApiKeyModal(true);
     }
   }, [onApiKeyChange]);
@@ -96,7 +82,28 @@ export default function ChatInterface({
   // 입력 상태 관리
   const [input, setInput] = useState('');
 
-  // Vercel AI SDK의 useChat 훅 사용 (v2 API) - 클라이언트에서 직접 호출
+  // AI SDK 기본 HTTP transport를 사용해
+  // 서버(/api/chat)가 내려주는 UI Message Stream을 올바르게 파싱/처리합니다.
+  // (커스텀 transport에서 Response를 반환하면 stream.pipeThrough 에러가 날 수 있음)
+  const transport = useMemo(() => {
+    return new DefaultChatTransport({
+      api: '/api/chat',
+      // 팀 코드는 body로 전달 (메시지 배열은 transport가 자동 포함)
+      body: { teamCode: teamId },
+      // Authorization + 사용자 Gemini 키는 매 요청 시점에 동적으로 평가
+      headers: async () => {
+        const storedKey = SafeSessionStorage.getItem('gemini_api_key') || '';
+        const { data: { session } } = await supabase.auth.getSession();
+        const accessToken = session?.access_token || '';
+        return {
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          ...(storedKey ? { 'x-gemini-api-key': storedKey } : {}),
+        };
+      },
+    });
+  }, [teamId]);
+
+  // Vercel AI SDK의 useChat 훅 사용
   const {
     messages,
     sendMessage,
@@ -104,103 +111,21 @@ export default function ChatInterface({
     error,
     setMessages,
   } = useChat({
-    transport: {
-      async sendMessages({ messages: chatMessages }) {
-        try {
-          // API Key 확인 (상태가 비어있을 수 있으므로 sessionStorage에서 직접 가져오기)
-          let currentApiKey = apiKey;
-          if (!currentApiKey || currentApiKey.trim().length === 0) {
-            const storedKey = SafeSessionStorage.getItem('gemini_api_key');
-            if (storedKey && storedKey.trim().length > 0) {
-              currentApiKey = storedKey;
-              setApiKey(storedKey); // 상태도 업데이트
-                  } else {
-              setShowApiKeyModal(true);
-              throw new Error('API Key가 필요합니다. 먼저 API Key를 입력해주세요.');
-            }
-          }
-
-          // ChatService를 통해 클라이언트에서 직접 Gemini API 호출
-          // @ai-sdk/react v2의 메시지 형식 변환 (parts, text, content 속성 모두 지원)
-          const formattedMessages = chatMessages.map((msg: any) => {
-            let content = '';
-            const role = msg.role || 'user';
-            
-            // parts 배열에서 텍스트 추출 (우선순위 1)
-            if (msg.parts && Array.isArray(msg.parts) && msg.parts.length > 0) {
-              // parts 배열의 각 요소에서 텍스트 추출
-              content = msg.parts
-                .map((part: any) => {
-                  if (typeof part === 'string') return part;
-                  if (part.text) return part.text;
-                  if (part.content) return part.content;
-                  return '';
-                })
-                .filter((text: string) => text && text.trim().length > 0)
-                .join(' ');
-            }
-            
-            // text 속성 확인 (우선순위 2)
-            if (!content && msg.text) {
-              content = typeof msg.text === 'string' ? msg.text : String(msg.text);
-            }
-            
-            // content 속성 확인 (우선순위 3)
-            if (!content && msg.content) {
-              content = typeof msg.content === 'string' ? msg.content : String(msg.content);
-            }
-            
-            if (!content) {
-              console.warn('메시지에 content가 없습니다:', msg);
-            }
-            
-            return {
-              role: role,
-              content: content,
-            };
-          }).filter((msg: any) => msg.content && msg.content.trim().length > 0); // 빈 메시지 제거
-
-          if (formattedMessages.length === 0) {
-            throw new Error('전송할 메시지가 없습니다.');
-          }
-
-          // userId 확인 (상태가 없으면 직접 세션에서 가져오기)
-          let currentUserId = userId;
-          if (!currentUserId) {
-            try {
-              const { data: { session } } = await supabase.auth.getSession();
-              if (session?.user) {
-                currentUserId = session.user.id;
-                setUserId(currentUserId); // 상태도 업데이트
-              } else {
-                throw new Error('사용자 세션이 없습니다. 다시 로그인해주세요.');
-              }
-            } catch (error: any) {
-              console.error('사용자 ID 조회 실패:', error);
-              throw new Error('사용자 인증이 필요합니다. 다시 로그인해주세요.');
-            }
-          }
-
-          // ChatService가 toDataStreamResponse 형식으로 반환하므로
-          // useChat이 자동으로 처리할 수 있도록 Response 객체를 직접 반환
-          const response = await ChatService.streamChat({
-            messages: formattedMessages,
-            apiKey: currentApiKey, // sessionStorage에서 가져온 키 사용
-            teamCode: teamId, // teamId는 이제 코드
-            userId: currentUserId, // Supabase auth에서 가져온 userId
-          });
-
-          // toDataStreamResponse가 반환한 Response 객체를 그대로 반환
-          // useChat이 자동으로 스트림을 파싱하여 처리함
-          return response;
-        } catch (error: any) {
-          console.error('ChatService error:', error);
-          throw error;
-        }
-      },
-      async reconnectToStream() {
-        return null; // 재연결 기능은 구현하지 않음
-      },
+    transport,
+    onFinish: ({ message }: any) => {
+      // 서버(api/chat.ts)가 finish 파트의 totalUsage를 message.metadata.usage로 주입합니다.
+      const usage = message?.metadata?.usage;
+      if (usage && typeof usage.totalTokens === 'number') {
+        setTokenUsageHistory((prev) => [
+          ...prev,
+          {
+            promptTokens: usage.promptTokens || 0,
+            completionTokens: usage.completionTokens || 0,
+            totalTokens: usage.totalTokens || 0,
+            timestamp: new Date(),
+          },
+        ]);
+      }
     },
     onError: (error: any) => {
       console.error('Chat error:', error);
@@ -216,10 +141,122 @@ export default function ChatInterface({
 
   const isLoading = status === 'streaming' || status === 'submitted';
 
+  // ⚠️ Hook은 조건/루프(messages.map) 안에서 호출하면 안 됩니다.
+  // ReactMarkdown components 객체는 최상단에서 한 번만 생성해 재사용합니다.
+  const markdownComponents = useMemo(() => ({
+    // 테이블 스타일링
+    table: ({ children }: any) => (
+      <div className="overflow-x-auto my-4 -mx-2 px-2">
+        <table className="min-w-full border-collapse border border-slate-600 bg-slate-700">
+          {children}
+        </table>
+      </div>
+    ),
+    thead: ({ children }: any) => (
+      <thead className="bg-slate-600 text-slate-100">
+        {children}
+      </thead>
+    ),
+    tbody: ({ children }: any) => (
+      <tbody className="divide-y divide-slate-600 bg-slate-700">
+        {children}
+      </tbody>
+    ),
+    tr: ({ children }: any) => (
+      <tr className="hover:bg-slate-600/50 transition-colors">
+        {children}
+      </tr>
+    ),
+    th: ({ children }: any) => (
+      <th className="border border-slate-500 px-3 py-2 text-left font-semibold text-sm bg-slate-600 text-slate-100">
+        {children}
+      </th>
+    ),
+    td: ({ children }: any) => (
+      <td className="border border-slate-500 px-3 py-2 text-sm text-slate-200">
+        {children}
+      </td>
+    ),
+    // 제목 스타일링
+    h1: ({ children }: any) => (
+      <h1 className="text-2xl font-bold text-slate-100 mb-3 mt-4 first:mt-0">
+        {children}
+      </h1>
+    ),
+    h2: ({ children }: any) => (
+      <h2 className="text-xl font-bold text-slate-100 mb-2 mt-3">
+        {children}
+      </h2>
+    ),
+    h3: ({ children }: any) => (
+      <h3 className="text-lg font-semibold text-slate-100 mb-2 mt-2">
+        {children}
+      </h3>
+    ),
+    // 문단
+    p: ({ children }: any) => (
+      <p className="mb-3 text-slate-200 leading-relaxed last:mb-0">
+        {children}
+      </p>
+    ),
+    // 리스트
+    ul: ({ children }: any) => (
+      <ul className="list-disc list-inside mb-3 space-y-1 text-slate-200">
+        {children}
+      </ul>
+    ),
+    ol: ({ children }: any) => (
+      <ol className="list-decimal list-inside mb-3 space-y-1 text-slate-200">
+        {children}
+      </ol>
+    ),
+    // 강조
+    strong: ({ children }: any) => (
+      <strong className="font-bold text-slate-100">
+        {children}
+      </strong>
+    ),
+    // 코드
+    code: ({ children, className }: any) => {
+      const isInline = !className;
+      return isInline ? (
+        <code className="bg-slate-700 px-1.5 py-0.5 rounded text-sm font-mono text-slate-100">
+          {children}
+        </code>
+      ) : (
+        <code className={className}>{children}</code>
+      );
+    },
+    pre: ({ children }: any) => (
+      <pre className="bg-slate-700 p-3 rounded text-sm font-mono overflow-x-auto my-3 text-slate-100">
+        {children}
+      </pre>
+    ),
+    // 링크
+    a: ({ children, href }: any) => (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-400 hover:text-blue-300 underline"
+      >
+        {children}
+      </a>
+    ),
+  }), []);
+
   // 입력 변경 핸들러
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInput(e.target.value);
   };
+
+  // AI 응답이 끝나면(ready) 바로 입력 가능하도록 포커스
+  useEffect(() => {
+    if (status === 'ready') {
+      // 다음 프레임에 포커스
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [status]);
 
   // 폼 제출 핸들러
   const handleSubmit = (e?: React.FormEvent<HTMLFormElement>) => {
@@ -293,7 +330,8 @@ export default function ChatInterface({
       showToast('먼저 API Key를 입력해주세요.', 'warning');
       return;
     }
-    sendMessage({ text: '일정을 진행해주세요.' });
+    // 요구사항: "다음 이벤트로 진행"
+    sendMessage({ text: '다음 이벤트로 진행해주세요.' });
   };
 
   // 지시사항 옵션 선택 핸들러
@@ -334,13 +372,27 @@ export default function ChatInterface({
         }
 
         if (messageText) {
-          // parseAIResponse를 사용하여 options 추출
-          const { parseAIResponse } = require('../lib/utils');
+          // parseAIResponse를 사용하여 옵션/STATUS/NEWS/GUI_EVENT 등 추출
           const parsed = parseAIResponse(messageText);
+
+          // 옵션(지시사항 버튼)
           if (parsed.options && parsed.options.length > 0) {
             setCurrentOptions(parsed.options);
-      } else {
+          } else {
             setCurrentOptions([]);
+          }
+
+          // 헤더 상태(자금/날짜/샐러리캡)
+          if (parsed.status) {
+            if (typeof parsed.status.budgetValue === 'number') {
+              setHeaderBudget(parsed.status.budgetValue);
+            }
+            if (typeof parsed.status.date === 'string') {
+              setHeaderDate(parsed.status.date);
+            }
+            if (typeof parsed.status.salaryCapUsage === 'number') {
+              setHeaderSalaryCapUsage(parsed.status.salaryCapUsage);
+            }
           }
         }
       }
@@ -396,11 +448,14 @@ export default function ChatInterface({
   };
 
   return (
-    <div className="flex flex-col h-screen bg-slate-900 text-slate-100">
+    <div className="flex flex-col h-[100dvh] bg-slate-900 text-slate-100">
       {/* 헤더 */}
         <GameHeader 
         teamName={selectedTeamName || 'KBO GM 시뮬레이터'}
+        budget={headerBudget}
+        date={headerDate}
         difficulty={difficulty as any}
+        salaryCapUsage={headerSalaryCapUsage}
         onApiKeyClick={handleApiKeyReset}
         onSaveLoadClick={handleSaveLoadClick}
         onTokenUsageClick={() => setShowTokenUsageModal(true)}
@@ -408,7 +463,8 @@ export default function ChatInterface({
       />
 
       {/* 메시지 영역 */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl px-4 py-4 space-y-4">
         {messages.length === 0 && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center text-slate-400">
@@ -450,114 +506,32 @@ export default function ChatInterface({
           }
           
           // AI 메시지는 마크다운으로 직접 렌더링
+          // AI SDK v5는 message.content 대신 message.parts에 텍스트가 들어오는 경우가 많음
+          let assistantContent = '';
+          if (message.parts && Array.isArray(message.parts)) {
+            assistantContent = message.parts
+              .map((part: any) => {
+                if (typeof part === 'string') return part;
+                if (part.text) return part.text;
+                if (part.content) return part.content;
+                return '';
+              })
+              .filter((text: string) => text && text.trim().length > 0)
+              .join(' ');
+          } else if (message.content) {
+            assistantContent = message.content;
+          } else if (message.text) {
+            assistantContent = message.text;
+          }
+
           return (
             <div key={message.id} className="flex justify-start mb-4">
               <div className="bg-slate-800 rounded-lg p-4 max-w-3xl w-full">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
-                  components={useMemo(() => ({
-                    // 테이블 스타일링
-                    table: ({ children }: any) => (
-                      <div className="overflow-x-auto my-4 -mx-2 px-2">
-                        <table className="min-w-full border-collapse border border-slate-600 bg-slate-700">
-                          {children}
-                        </table>
-                      </div>
-                    ),
-                    thead: ({ children }: any) => (
-                      <thead className="bg-slate-600 text-slate-100">
-                        {children}
-                      </thead>
-                    ),
-                    tbody: ({ children }: any) => (
-                      <tbody className="divide-y divide-slate-600 bg-slate-700">
-                        {children}
-                      </tbody>
-                    ),
-                    tr: ({ children }: any) => (
-                      <tr className="hover:bg-slate-600/50 transition-colors">
-                        {children}
-                      </tr>
-                    ),
-                    th: ({ children }: any) => (
-                      <th className="border border-slate-500 px-3 py-2 text-left font-semibold text-sm bg-slate-600 text-slate-100">
-                        {children}
-                      </th>
-                    ),
-                    td: ({ children }: any) => (
-                      <td className="border border-slate-500 px-3 py-2 text-sm text-slate-200">
-                        {children}
-                      </td>
-                    ),
-                    // 제목 스타일링
-                    h1: ({ children }: any) => (
-                      <h1 className="text-2xl font-bold text-slate-100 mb-3 mt-4 first:mt-0">
-                        {children}
-                      </h1>
-                    ),
-                    h2: ({ children }: any) => (
-                      <h2 className="text-xl font-bold text-slate-100 mb-2 mt-3">
-                        {children}
-                      </h2>
-                    ),
-                    h3: ({ children }: any) => (
-                      <h3 className="text-lg font-semibold text-slate-100 mb-2 mt-2">
-                        {children}
-                      </h3>
-                    ),
-                    // 문단
-                    p: ({ children }: any) => (
-                      <p className="mb-3 text-slate-200 leading-relaxed last:mb-0">
-                        {children}
-                      </p>
-                    ),
-                    // 리스트
-                    ul: ({ children }: any) => (
-                      <ul className="list-disc list-inside mb-3 space-y-1 text-slate-200">
-                        {children}
-                      </ul>
-                    ),
-                    ol: ({ children }: any) => (
-                      <ol className="list-decimal list-inside mb-3 space-y-1 text-slate-200">
-                        {children}
-                      </ol>
-                    ),
-                    // 강조
-                    strong: ({ children }: any) => (
-                      <strong className="font-bold text-slate-100">
-                        {children}
-                      </strong>
-                    ),
-                    // 코드
-                    code: ({ children, className }: any) => {
-                      const isInline = !className;
-                      return isInline ? (
-                        <code className="bg-slate-700 px-1.5 py-0.5 rounded text-sm font-mono text-slate-100">
-                          {children}
-                        </code>
-                      ) : (
-                        <code className={className}>{children}</code>
-                      );
-                    },
-                    pre: ({ children }: any) => (
-                      <pre className="bg-slate-700 p-3 rounded text-sm font-mono overflow-x-auto my-3 text-slate-100">
-                        {children}
-                      </pre>
-                    ),
-                    // 링크
-                    a: ({ children, href }: any) => (
-                      <a 
-                        href={href} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-blue-400 hover:text-blue-300 underline"
-                      >
-                        {children}
-                      </a>
-                    ),
-                  }), [])}
+                  components={markdownComponents}
                 >
-                  {message.content}
+                  {assistantContent}
                 </ReactMarkdown>
                 {isLoading && message.role === 'assistant' && (
                   <div className="inline-flex items-center gap-1 ml-2 mt-2">
@@ -591,11 +565,12 @@ export default function ChatInterface({
           )}
 
           <div ref={messagesEndRef} />
+        </div>
       </div>
 
       {/* 입력 영역 */}
-      <div className="border-t border-slate-700 p-4 bg-slate-800">
-        <div className="flex gap-2 items-center">
+      <div className="border-t border-slate-700 bg-slate-800">
+        <div className="mx-auto w-full max-w-3xl px-4 py-3 flex gap-2 items-center">
           {/* 도움말 버튼 (위로 이동) */}
               <button
             onClick={() => setShowHelpModal(true)}
@@ -621,6 +596,16 @@ export default function ChatInterface({
                 )}
             </div>
 
+          {/* 일정 진행(다음 이벤트) 버튼: 지시사항 버튼 옆 */}
+          <button
+            onClick={handleScheduleProgress}
+            disabled={isLoading || !apiKey}
+            className="p-2 bg-baseball-gold hover:bg-yellow-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center justify-center min-w-[40px] min-h-[40px]"
+            title="다음 이벤트로 진행"
+          >
+            <FastForward className="w-5 h-5" />
+          </button>
+
           <form onSubmit={handleSubmit} className="flex-1 flex gap-2">
             <input
               type="text"
@@ -629,6 +614,7 @@ export default function ChatInterface({
               placeholder="메시지를 입력하세요..."
               className="flex-1 bg-slate-700 text-slate-100 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               disabled={isLoading || !apiKey}
+              ref={inputRef}
             />
             <button
               type="submit"
@@ -648,9 +634,6 @@ export default function ChatInterface({
         onClose={() => setShowInstructionsModal(false)}
         options={currentOptions}
         onOptionSelect={handleOptionSelect}
-        onScheduleProgress={handleScheduleProgress}
-        isLoading={isLoading}
-        hasApiKey={!!apiKey}
       />
 
       {/* 도움말 모달 */}
@@ -708,7 +691,7 @@ export default function ChatInterface({
               <p className="text-slate-400 text-sm mb-4">
                 채팅 기능을 사용하려면 Google Gemini API Key가 필요합니다.
                 <br />
-                <span className="text-yellow-400">⚠️ API Key는 브라우저에만 저장되며, 서버로 전송되지 않습니다.</span>
+                <span className="text-yellow-400">⚠️ API Key는 DB에 저장되지 않으며, 요청 시에만 서버로 전달되어 Gemini 호출에 사용됩니다.</span>
               </p>
 
               <div className="space-y-4">
@@ -758,8 +741,6 @@ export default function ChatInterface({
         )}
       </AnimatePresence>
 
-      {/* 로딩 오버레이 */}
-      {isLoading && <LoadingOverlay isLoading={isLoading} />}
     </div>
   );
 }
