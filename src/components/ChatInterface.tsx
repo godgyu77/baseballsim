@@ -13,10 +13,11 @@ import InstructionsModal from './InstructionsModal';
 import HelpModal from './HelpModal';
 import SaveLoadModal from './SaveLoadModal';
 import TokenUsageModal from './TokenUsageModal';
+import RecruitModal from './RecruitModal';
 import { useToast } from '../context/ToastContext';
-import { SafeSessionStorage } from '../lib/safeStorage';
+import { SafeStorage } from '../lib/safeStorage';
 import { supabase } from '../lib/supabase';
-import { parseAIResponse } from '../lib/utils';
+import { parseAIResponse, type GUIEvent } from '../lib/utils';
 
 interface ChatInterfaceProps {
   teamId: string; // 팀 코드 (예: 'kia', 'samsung', 'hanwha')
@@ -30,7 +31,7 @@ interface ChatInterfaceProps {
  * ChatInterface 컴포넌트
  * 
  * - 사용자가 Gemini API Key를 입력합니다.
- * - API Key는 세션 스토리지에만 저장 (DB 저장 안 함)
+ * - API Key는 로컬 스토리지에 저장 (DB 저장 안 함)
  * - 브라우저에서 Gemini API를 직접 호출하지 않고, `/api/chat`(Edge Function)에서 호출 후
  *   AI SDK UI Message Stream 형태로 스트리밍 응답을 받아 렌더링합니다.
  */
@@ -62,13 +63,15 @@ export default function ChatInterface({
   const [headerBudget, setHeaderBudget] = useState<number | null>(null);
   const [headerDate, setHeaderDate] = useState<string | null>(null);
   const [headerSalaryCapUsage, setHeaderSalaryCapUsage] = useState<number | undefined>(undefined);
+  const [activeGuiEvent, setActiveGuiEvent] = useState<GUIEvent | null>(null);
+  const [showGuiEventModal, setShowGuiEventModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
 
-  // 세션 스토리지에서 API Key 불러오기
+  // 로컬 스토리지에서 API Key 불러오기 (새 창/새 탭에서도 유지)
   useEffect(() => {
-    const storedKey = SafeSessionStorage.getItem('gemini_api_key');
+    const storedKey = SafeStorage.getItem('gemini_api_key');
     if (storedKey) {
       setApiKey(storedKey);
       if (onApiKeyChange) {
@@ -92,7 +95,7 @@ export default function ChatInterface({
       body: { teamCode: teamId },
       // Authorization + 사용자 Gemini 키는 매 요청 시점에 동적으로 평가
       headers: async () => {
-        const storedKey = SafeSessionStorage.getItem('gemini_api_key') || '';
+        const storedKey = SafeStorage.getItem('gemini_api_key') || '';
         const { data: { session } } = await supabase.auth.getSession();
         const accessToken = session?.access_token || '';
         return {
@@ -283,10 +286,10 @@ export default function ChatInterface({
 
   // 처음 시작 시 AI 자동 시작
   useEffect(() => {
-    // API Key 확인 (SafeSessionStorage 사용)
+    // API Key 확인 (LocalStorage 사용: 새 창/새 탭에서도 유지)
     let currentApiKey = apiKey;
     if (!currentApiKey || currentApiKey.trim().length === 0) {
-      const storedKey = SafeSessionStorage.getItem('gemini_api_key');
+      const storedKey = SafeStorage.getItem('gemini_api_key');
       if (storedKey && storedKey.trim().length > 0) {
         currentApiKey = storedKey;
         setApiKey(storedKey);
@@ -382,6 +385,12 @@ export default function ChatInterface({
             setCurrentOptions([]);
           }
 
+          // GUI 이벤트(예: 외국인 영입/드래프트 등) 자동 오픈
+          if (parsed.guiEvent) {
+            setActiveGuiEvent(parsed.guiEvent);
+            setShowGuiEventModal(true);
+          }
+
           // 헤더 상태(자금/날짜/샐러리캡)
           if (parsed.status) {
             if (typeof parsed.status.budgetValue === 'number') {
@@ -399,6 +408,23 @@ export default function ChatInterface({
     }
   }, [messages]);
 
+  const handleGuiCandidateSelect = (candidate: any) => {
+    const name = candidate?.name ? String(candidate.name) : '';
+    if (!name) return;
+    // 후보 선택은 "이름 영입" 형태로 AI에게 전달 (프롬프트가 자연어 선택을 처리)
+    sendMessage({ text: `${name} 영입` });
+    setShowGuiEventModal(false);
+  };
+
+  const handleGuiEventClose = () => {
+    setShowGuiEventModal(false);
+  };
+
+  const handleFinishRecruit = () => {
+    sendMessage({ text: '외국인 영입 종료' });
+    setShowGuiEventModal(false);
+  };
+
   // API Key 저장 핸들러
   const handleApiKeySubmit = () => {
     if (!tempApiKey.trim()) {
@@ -412,13 +438,13 @@ export default function ChatInterface({
               return;
             }
             
-    // 세션 스토리지에 저장
+    // 로컬 스토리지에 저장 (새 창/새 탭에서도 유지)
     try {
-      sessionStorage.setItem('gemini_api_key', tempApiKey);
+      SafeStorage.setItem('gemini_api_key', tempApiKey);
     } catch (error) {
       // Storage 접근 오류 처리 (예: iframe, 보안 컨텍스트 등)
-      console.warn('SessionStorage 저장 불가:', error);
-      // 메모리에만 저장 (페이지 새로고침 시 사라짐)
+      console.warn('LocalStorage 저장 불가:', error);
+      // Fallback은 SafeStorage 내부에서 처리됨
     }
     
     setApiKey(tempApiKey);
@@ -435,7 +461,7 @@ export default function ChatInterface({
 
   // API Key 삭제 핸들러
   const handleApiKeyReset = () => {
-    SafeSessionStorage.removeItem('gemini_api_key');
+    SafeStorage.removeItem('gemini_api_key');
     setApiKey('');
     setShowApiKeyModal(true);
     setMessages([]);
@@ -524,6 +550,10 @@ export default function ChatInterface({
             assistantContent = message.text;
           }
 
+          // [FIX] 시스템 태그([OPTIONS]/[GUI_EVENT]/[NEWS]/[STATUS] 등)는 채팅 본문에서 제거하고,
+          // 옵션/GUI 이벤트는 별도 UI로 표시한다.
+          const parsedAssistant = parseAIResponse(assistantContent);
+
           return (
             <div key={message.id} className="flex justify-start mb-4">
               <div className="bg-slate-800 rounded-lg p-4 max-w-3xl w-full">
@@ -531,8 +561,40 @@ export default function ChatInterface({
                   remarkPlugins={[remarkGfm]}
                   components={markdownComponents}
                 >
-                  {assistantContent}
+                  {parsedAssistant.text}
                 </ReactMarkdown>
+
+                {/* OPTIONS 태그는 텍스트로 노출하지 않고, 실제 버튼 UI로만 제공 */}
+                {parsedAssistant.options?.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {parsedAssistant.options.map((opt, idx) => (
+                      <button
+                        key={`${message.id}-opt-${idx}`}
+                        onClick={() => handleOptionSelect(opt.value)}
+                        disabled={isLoading}
+                        className="px-3 py-2 rounded-lg bg-baseball-gold hover:bg-yellow-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-slate-900 font-semibold text-sm transition-colors"
+                        title={opt.value}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* GUI_EVENT가 있으면 '후보 목록 보기' 버튼 제공 (목록은 모달에서 렌더링) */}
+                {parsedAssistant.guiEvent?.type === 'RECRUIT' && (
+                  <div className="mt-3">
+                    <button
+                      onClick={() => {
+                        setActiveGuiEvent(parsedAssistant.guiEvent || null);
+                        setShowGuiEventModal(true);
+                      }}
+                      className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 font-semibold text-sm transition-colors"
+                    >
+                      후보 명단 보기
+                    </button>
+                  </div>
+                )}
                 {isLoading && message.role === 'assistant' && (
                   <div className="inline-flex items-center gap-1 ml-2 mt-2">
                     <div className="w-2 h-4 bg-blue-400 rounded-full animate-pulse" />
@@ -664,6 +726,15 @@ export default function ChatInterface({
           totalTokens: tokenUsageHistory.reduce((sum, u) => sum + u.totalTokens, 0),
           requestCount: tokenUsageHistory.length,
         }}
+      />
+
+      {/* GUI 이벤트 모달 (예: 외국인 선수 영입 후보 명단) */}
+      <RecruitModal
+        isOpen={showGuiEventModal && activeGuiEvent?.type === 'RECRUIT'}
+        onClose={handleGuiEventClose}
+        event={activeGuiEvent}
+        onSelectCandidate={handleGuiCandidateSelect}
+        onFinishRecruit={handleFinishRecruit}
       />
 
       {/* API Key 입력 모달 */}

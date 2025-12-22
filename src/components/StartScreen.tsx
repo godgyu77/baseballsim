@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FolderOpen, Play, Key, X, AlertCircle, CheckCircle2, LogOut } from 'lucide-react';
-import { SafeSessionStorage } from '../lib/safeStorage';
+import { SafeStorage } from '../lib/safeStorage';
 
 interface StartScreenProps {
   apiKey: string;
@@ -20,9 +20,9 @@ export default function StartScreen({ apiKey, onLoadGame, onStartNew, onLogout, 
   const [apiKeyError, setApiKeyError] = useState('');
   const [hasApiKey, setHasApiKey] = useState(false);
 
-  // 세션 스토리지에서 API Key 확인 (로그인 후에만)
+  // 로컬 스토리지에서 API Key 확인 (새 창/새 탭에서도 유지, 로그인 후에만)
   useEffect(() => {
-    const storedKey = SafeSessionStorage.getItem('gemini_api_key');
+    const storedKey = SafeStorage.getItem('gemini_api_key');
     if (storedKey && storedKey.trim().length > 0) {
       setHasApiKey(true);
       if (onApiKeySet) {
@@ -58,7 +58,7 @@ export default function StartScreen({ apiKey, onLoadGame, onStartNew, onLogout, 
       return;
     }
 
-    SafeSessionStorage.setItem('gemini_api_key', trimmedKey);
+    SafeStorage.setItem('gemini_api_key', trimmedKey);
     setHasApiKey(true);
     setShowApiKeyModal(false);
     setApiKeyError('');
@@ -70,7 +70,7 @@ export default function StartScreen({ apiKey, onLoadGame, onStartNew, onLogout, 
 
   // API Key 수정
   const handleEditApiKey = () => {
-    const storedKey = SafeSessionStorage.getItem('gemini_api_key');
+    const storedKey = SafeStorage.getItem('gemini_api_key');
     setTempApiKey(storedKey || '');
     setShowApiKeyModal(true);
   };

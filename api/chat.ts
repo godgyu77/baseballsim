@@ -37,7 +37,15 @@ async function generateGameContext({
   supabaseAnonKey: string;
   accessToken: string;
   teamCode: string;
-}): Promise<{ context: string; userId: string; teamId: number; currentBudget: number }> {
+}): Promise<{
+  context: string;
+  userId: string;
+  teamId: number;
+  currentBudget: number;
+  currentYear: number;
+  currentMonth: number;
+  currentWeek: number;
+}> {
   const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
     global: {
@@ -222,7 +230,7 @@ ${battersTable}
 ${retiredString}
 `;
 
-  return { context, userId, teamId, currentBudget: budget };
+  return { context, userId, teamId, currentBudget: budget, currentYear: year, currentMonth: month, currentWeek: week };
 }
 
 function parseStatusForDb(text: string): { year?: number; month?: number; day?: number; budgetWon?: number } {
@@ -267,6 +275,23 @@ export default async function handler(req: Request): Promise<Response> {
   // DefaultChatTransport는 UIMessage[]를 전송합니다.
   // streamText는 ModelMessage[]가 필요하므로 변환합니다.
   const uiMessages = Array.isArray(body.messages) ? body.messages : [];
+  const extractLatestUserText = (messages: any[]): string => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m?.role !== 'user') continue;
+      if (typeof m.content === 'string' && m.content.trim()) return m.content.trim();
+      if (typeof m.text === 'string' && m.text.trim()) return m.text.trim();
+      const parts = m.parts;
+      if (Array.isArray(parts)) {
+        const text = parts
+          .map((p: any) => (typeof p === 'string' ? p : p?.text ?? p?.content ?? ''))
+          .join(' ')
+          .trim();
+        if (text) return text;
+      }
+    }
+    return '';
+  };
   let modelMessages;
   try {
     modelMessages = convertToModelMessages(uiMessages);
@@ -294,6 +319,11 @@ export default async function handler(req: Request): Promise<Response> {
   });
   const gameContext = ctx.context;
 
+  const latestUserText = extractLatestUserText(uiMessages);
+  const isBroadcastWeek = ctx.currentMonth === 1 && ctx.currentWeek === 1;
+  const isBroadcastSelection = /\b(kbs|mbc|sbs)\s*계약\b/i.test(latestUserText) || /펨붕\s*tv\s*계약/i.test(latestUserText);
+  const shouldBlockBroadcastAuto = isBroadcastWeek && !isBroadcastSelection;
+
   const systemPrompt = `${KBO_SYSTEM_LOGIC}
 
 ${gameContext}
@@ -302,17 +332,20 @@ ${gameContext}
 - 위 [CURRENT_GAME_CONTEXT] 섹션의 데이터를 절대적 진실로 받아들이세요.
 - Context에 없는 선수는 언급하지 마세요.
 - 자금 계산은 Context의 '현재 보유 자금'을 기준으로 수행하세요.
-- 영구결번 리스트의 등번호는 절대 사용하지 마세요.`;
+- 영구결번 리스트의 등번호는 절대 사용하지 마세요.
+${shouldBlockBroadcastAuto ? '\n\n[OVERRIDE: 1월 1주차 방송국 계약]\n- 지금은 1월 1주차이며, 사용자가 방송국을 선택하기 전입니다.\n- 이 턴에서는 절대로 “계약 완료/자금 지급/다음 일정 진행/뉴스 출력”을 하지 말고,\n  오직 (1) 4개 방송국 제안서와 (2) 방송국 4개 [OPTIONS] 버튼만 출력하고 대기하세요.\n- [OPTIONS] value는 반드시 \"KBS 계약\"/\"MBC 계약\"/\"SBS 계약\"/\"펨붕TV 계약\" 이어야 합니다.\n' : ''}`;
 
   const google = createGoogleGenerativeAI({ apiKey });
   const result = streamText({
     model: google('gemini-2.5-flash'),
     system: systemPrompt,
     messages: modelMessages,
-    temperature: 0.7,
+    temperature: shouldBlockBroadcastAuto ? 0.2 : 0.7,
     onFinish: async ({ text }) => {
       // 모델 출력의 [STATUS]를 DB(game_state)에 반영해 다음 턴 Context가 일관되도록 합니다.
       if (!ctx.userId || ctx.teamId < 0) return;
+      // 1월 1주차 방송국 계약 "선택 전"에는 DB 업데이트를 차단해 자동 지급/스킵으로 인한 상태 오염을 막습니다.
+      if (shouldBlockBroadcastAuto) return;
       const parsed = parseStatusForDb(text || '');
       if (!parsed.budgetWon || !parsed.year || !parsed.month || !parsed.day) return;
 

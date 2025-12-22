@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Key, X, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { SafeSessionStorage } from '../lib/safeStorage';
+import { SafeStorage } from '../lib/safeStorage';
 
 interface ApiKeyModalProps {
   isOpen: boolean;
@@ -20,10 +20,10 @@ export default function ApiKeyModal({ isOpen, onClose, onApiKeySet, initialApiKe
   useEffect(() => {
     if (isOpen) {
       try {
-        const storedKey = SafeSessionStorage.getItem('gemini_api_key');
+        const storedKey = SafeStorage.getItem('gemini_api_key');
         setTempApiKey(storedKey || initialApiKey || '');
       } catch (error) {
-        console.warn('SessionStorage 읽기 불가:', error);
+        console.warn('LocalStorage 읽기 불가:', error);
         setTempApiKey(initialApiKey || '');
       }
     }
@@ -54,13 +54,13 @@ export default function ApiKeyModal({ isOpen, onClose, onApiKeySet, initialApiKe
     }
 
     try {
-      SafeSessionStorage.setItem('gemini_api_key', trimmedKey);
+      SafeStorage.setItem('gemini_api_key', trimmedKey);
       setApiKeyError('');
       onApiKeySet(trimmedKey);
       onClose();
     } catch (error) {
       // Storage 접근 오류 처리
-      console.warn('SessionStorage 저장 불가:', error);
+      console.warn('LocalStorage 저장 불가:', error);
       // 메모리에만 저장 (페이지 새로고침 시 사라짐)
       setApiKeyError('');
       onApiKeySet(trimmedKey);

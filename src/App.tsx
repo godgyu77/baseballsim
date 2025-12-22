@@ -8,7 +8,7 @@ import ApiKeyModal from './components/ApiKeyModal';
 import SaveLoadModal from './components/SaveLoadModal';
 import { supabase } from './lib/supabase';
 import type { Difficulty } from './constants/GameConfig';
-import { SafeSessionStorage } from './lib/safeStorage';
+import { SafeStorage } from './lib/safeStorage';
 
 type ViewState = 'START' | 'DIFFICULTY' | 'TEAM_SELECT' | 'GAME';
 
@@ -32,7 +32,7 @@ function App() {
 
   // API Key 확인 함수
   const checkApiKey = () => {
-    const storedKey = SafeSessionStorage.getItem('gemini_api_key');
+    const storedKey = SafeStorage.getItem('gemini_api_key');
     if (!storedKey || storedKey.trim().length === 0) {
       // API Key가 없으면 모달 표시
       setShowApiKeyModal(true);
@@ -138,8 +138,8 @@ function App() {
       setView('START');
       setApiKey('');
       
-      // SessionStorage 정리
-      SafeSessionStorage.removeItem('gemini_api_key');
+      // LocalStorage 정리 (API Key도 함께 삭제)
+      SafeStorage.removeItem('gemini_api_key');
       
       // 인증 모달 표시
       setShowAuthModal(true);
@@ -180,7 +180,7 @@ function App() {
     setUserId(newUserId);
     setShowAuthModal(false);
     // 로그인 성공 후 API Key 입력 모달 표시
-    const storedKey = SafeSessionStorage.getItem('gemini_api_key');
+    const storedKey = SafeStorage.getItem('gemini_api_key');
     if (!storedKey || storedKey.trim().length === 0) {
       setShowApiKeyModal(true);
     } else {
